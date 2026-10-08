@@ -1,6 +1,9 @@
 import {setTimeout as delay} from 'node:timers/promises';
+import {createServer} from 'node:http';
+import {createHmac} from 'node:crypto';
 import {RecoveryBot} from './core.mjs';
 import {ScholarshipPortal} from './portal.mjs';
+import {createWebhookHandler} from './webhook.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -52,8 +55,10 @@ const bot = new RecoveryBot({telegram, allowedUserId:owner, portalFactory:() => 
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
 let stopping = false;
+let webhookServer;
 async function shutdown() {
   stopping = true;
+  webhookServer?.close();
   for (const chatId of bot.sessions.keys()) await bot.clear(chatId);
   process.exit(0);
 }
@@ -61,10 +66,40 @@ process.on('SIGINT',shutdown);
 process.on('SIGTERM',shutdown);
 
 try {
-  const webhook = await telegram.api('getWebhookInfo',{});
-  if (webhook.url) throw new Error('A webhook is already configured for this token. Use a new BotFather bot for this polling program.');
-  const me = await telegram.api('getMe',{});
-  console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
+  const mode = process.env.BOT_MODE || (process.env.RENDER_EXTERNAL_URL ? 'webhook' : 'polling');
+  if (!['polling','webhook'].includes(mode)) throw new Error('BOT_MODE must be polling or webhook.');
+  if (mode === 'webhook') {
+    const base = new URL(process.env.WEBHOOK_BASE_URL || process.env.RENDER_EXTERNAL_URL || '');
+    if (base.protocol !== 'https:' || base.username || base.password) throw new Error('Webhook base URL must use HTTPS without embedded credentials.');
+    const webhookURL = new URL('/telegram', base).href;
+    const secret = createHmac('sha256',token).update('telespark-telegram-webhook-v1').digest('hex');
+    let ready = false;
+    const port = Number(process.env.PORT || '10000');
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
+    webhookServer = createServer(createWebhookHandler({
+      secret,
+      isReady:() => ready,
+      onUpdate:async update => { await bot.handle(update.message); },
+      onError:() => console.error('Message delivery or processing failed. No automatic recovery resubmission was made.'),
+    }));
+    await new Promise((resolve,reject) => {
+      webhookServer.once('error',reject);
+      webhookServer.listen(port,'0.0.0.0',resolve);
+    });
+    const webhook = await telegram.api('getWebhookInfo',{});
+    if (webhook.url && webhook.url !== webhookURL) throw new Error('This bot already has a webhook on another service. Confirm migration before replacing that connection.');
+    const me = await telegram.api('getMe',{});
+    await telegram.api('setWebhook',{
+      url:webhookURL, secret_token:secret, max_connections:1, allowed_updates:['message'],
+      // Keep pending updates: the message that wakes a sleeping service must not be discarded.
+    });
+    ready = true;
+    console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id and configure your owner ID.'} Webhook mode ready.`);
+  } else {
+    const webhook = await telegram.api('getWebhookInfo',{});
+    if (webhook.url) throw new Error('A webhook is configured for this token. Stop the cloud service and remove its webhook before switching to polling.');
+    const me = await telegram.api('getMe',{});
+    console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
   // Do not replay old CAPTCHA replies after restarting: a previous submission may have succeeded.
   const previous = await telegram.api('getUpdates',{offset:-1,limit:1,timeout:0,allowed_updates:['message']});
   let offset = previous.length ? previous[0].update_id + 1 : 0;
@@ -85,7 +120,9 @@ try {
       await delay(5000);
     }
   }
+  }
 } catch (error) {
   console.error(error.message);
+  webhookServer?.close();
   process.exitCode = 1;
 }

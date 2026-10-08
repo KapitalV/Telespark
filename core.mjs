@@ -138,6 +138,9 @@ export class RecoveryBot {
     if (message.reply_to_message?.message_id && message.reply_to_message.message_id !== state.captchaMessageId) {
       return send('That is an older CAPTCHA. Reply to the latest image or use /refresh.');
     }
+    if (message.date && (message.date + 1) * 1000 < state.captchaAt) {
+      return send('That reply was sent before the current CAPTCHA. Read the latest image and reply again.');
+    }
     if (this.clock() - state.captchaAt > 5 * 60_000) {
       await send('That CAPTCHA is old. I will show a fresh image; reply with its text.');
       return this.prepare(chatId, state);

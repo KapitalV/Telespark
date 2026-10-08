@@ -2,7 +2,7 @@
 
 This personal bot asks six questions in a private Telegram chat, fills the official postmatric recovery website, sends the CAPTCHA image, and submits when you reply with its text. On success it returns the latest password and the recovery slip. It uses Node.js, Playwright, and the Telegram Bot API. No AI subscription or public server is needed to run it on your PC.
 
-To run it continuously while your PC is off, follow [Deploy on Render](DEPLOY_RENDER.md). The included Dockerfile uses Chromium on Linux and reads secrets from the hosting environment.
+To use it while your PC is off, follow [Deploy on Render](DEPLOY_RENDER.md). The included Dockerfile uses Chromium on Linux and reads secrets from the hosting environment. Free web-service hosting uses Telegram webhooks; a paid worker uses polling.
 
 ## 1. Create your Telegram bot
 
@@ -86,7 +86,7 @@ After success, the bot sends your latest password and a PNG recovery slip. Repea
 
 ## Running and handling errors
 
-Keep this PowerShell process and your PC running with internet access while using the bot. Only one instance should run for a token. Long polling needs no incoming ports, webhook, or public URL. If the token already has a webhook, use a new BotFather bot for this program rather than changing another service's connection.
+For local polling mode, keep this PowerShell process and your PC running with internet access while using the bot. Only one instance should run for a token. Polling needs no incoming ports or public URL. A Render Free Web Service uses webhook mode instead; see the deployment guide. Do not run local polling and the cloud webhook for the same token at the same time.
 
 An invalid CAPTCHA produces a new image while retaining the six details. A recognized mismatch requests only the affected field, such as Class 10 passing year. Unknown results and navigation timeouts stop submission attempts because the password might already have changed. Check the official site before intentionally starting another recovery.
 

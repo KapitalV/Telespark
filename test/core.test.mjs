@@ -95,6 +95,14 @@ test('Older CAPTCHA image replies are rejected without submitting', async () => 
   assert.equal(f.submissions.length,0);
 });
 
+test('An old queued reply cannot submit the new CAPTCHA created after a cold start', async () => {
+  const f = fixture();
+  await f.fill();
+  await f.bot.handle(f.message('AbC12',{date:Math.floor(Date.now()/1000)-60}));
+  assert.equal(f.submissions.length,0);
+  assert.match(f.messages.at(-1),/before the current CAPTCHA/);
+});
+
 test('Unknown submission outcome stops all retries', async () => {
   const f = fixture();
   await f.fill(); await f.say('AbC12'); await f.say('XyZ45'); await f.say('/refresh');

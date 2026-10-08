@@ -1,4 +1,22 @@
-# Run Telespark continuously on Render
+# Deploy Telespark on Render
+
+## Free web service with Telegram webhooks
+
+Use this option for free hosting. Render's free service sleeps after fifteen minutes without incoming traffic. A Telegram webhook request can wake it, with a cold-start delay. This is not guaranteed uninterrupted 24/7 hosting. Sessions are in memory and are lost on sleep or restart; send `/start` again after an interrupted conversation. Chromium must fit within the free plan's memory; real recovery needs to be verified after deployment.
+
+1. Create a **Web Service**, connect KapitalV/Telespark on branch `main`, and select Docker.
+2. Select **Free** compute. Keep the repository root empty and Dockerfile path `./Dockerfile`. Use its default command, `node bot.mjs`.
+3. Add `TELEGRAM_BOT_TOKEN` with your replacement token and `TELEGRAM_ALLOWED_USER_ID` with your numeric ID.
+4. Set `HEADLESS=true`, `BROWSER_CHANNEL=chromium`, and `BOT_MODE=webhook`.
+5. Set the health-check path to `/healthz`. Render supplies `PORT` and `RENDER_EXTERNAL_URL`; no manual webhook URL is needed there.
+6. Deploy and look for `Webhook mode ready` in the logs. The application registers `/telegram` with Telegram using an authenticated secret header derived from the bot token. It does not expose the bot token in the webhook URL or logs.
+7. Send `/help` or `/start` to the bot. Telegram can retry delivery while the web service wakes. Once awake, complete the six questions and reply to the CAPTCHA image. Duplicate updates are processed only once per running process. Queued replies from before a new CAPTCHA are not submitted.
+
+Only run one instance and stop any local polling process using this token. If a webhook is configured on a different service, this program stops rather than silently replacing it. Confirm that migration before changing the existing connection.
+
+Free compute has monthly hour, bandwidth, and build limits. If no payment method is added, exceeding included quotas can suspend services/builds instead of charging for additional usage. If a payment method is present, review billing limits before deployment because bandwidth or build overages can cost money. This setup does not add a paid plan, database, or disk. See https://render.com/docs/free.
+
+## Paid worker for continuous polling
 
 Use a Docker Background Worker with one instance. The Dockerfile contains Chromium and its Linux dependencies. The Windows Edge installation is not needed on Render. This program uses outbound Telegram polling and does not need a public HTTP endpoint or webhook.
 
