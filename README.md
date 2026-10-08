@@ -1,4 +1,4 @@
-# UP Scholarship Telegram recovery bot
+# Telespark — UP Scholarship Telegram recovery bot
 
 This personal bot asks six questions in a private Telegram chat, fills the official postmatric recovery website, sends the CAPTCHA image, and submits when you reply with its text. On success it returns the latest password and the recovery slip. It uses Node.js, Playwright, and the Telegram Bot API. No AI subscription or public server is needed to run it on your PC.
 
@@ -13,11 +13,12 @@ Official instructions: https://core.telegram.org/bots/features#creating-a-new-bo
 Open PowerShell and run:
 
 ```powershell
-cd 'D:\electroshorts\scholarship-telegram-bot'
+git clone https://github.com/KapitalV/Telespark.git
+cd Telespark
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Node.js 22 or later must be installed. On this PC, Node.js 24 was available when the project was created. For another PC, use https://nodejs.org/en/download if needed.
+Node.js 22 or later and Git must be installed. Download Node.js from https://nodejs.org/en/download if needed. If you download the repository as a ZIP instead of cloning, extract it and open PowerShell in the extracted folder before running `setup.ps1`.
 
 Setup installs the pinned dependencies, checks for Microsoft Edge, and creates `.env` from `.env.example` if it does not already exist. The bot uses your installed Edge in a separate automation session, avoiding a large browser download. It does not change Windows execution policy persistently.
 
@@ -33,6 +34,8 @@ BROWSER_CHANNEL=msedge
 ```
 
 The placeholders are examples; never paste them literally as your token. Set `HEADLESS=false` if you want to watch the browser. If using an installed Google Chrome instead, set `BROWSER_CHANNEL=chrome`. The default on Windows is Edge even if this line is omitted. On another platform, set `BROWSER_CHANNEL=chromium` and run `npm.cmd run install-browser` (use `npm` outside Windows).
+
+Keep `.env` local. Git ignores it and other `.env.*` files, except the empty `.env.example` template. If a real token has previously been committed, revoke it in BotFather and use a replacement: removing the file from the latest commit does not remove the token from Git history.
 
 ## 4. Get your Telegram user ID
 
@@ -97,7 +100,7 @@ npm.cmd test
 
 The automated tests exercise input validation, owner-only access, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
 
-The live website field IDs and success/error text were observed during the earlier browser recovery. End-to-end Telegram operation requires your token and owner ID and has not been verified until those are configured. An initial bundled Chromium download ran out of space, so this Windows setup now uses the installed Microsoft Edge.
+The live website field IDs and success/error text were observed during development. End-to-end Telegram operation requires your token and owner ID and has not been verified until those are configured. The Windows setup uses the installed Microsoft Edge to avoid a bundled browser download.
 
 API documentation: https://core.telegram.org/bots/api#getupdates
 
