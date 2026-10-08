@@ -1,0 +1,13 @@
+{
+  "name": "scholarship-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file=.env bot.mjs",
+    "test": "node --test",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": { "playwright": "1.64.0" }
+}
