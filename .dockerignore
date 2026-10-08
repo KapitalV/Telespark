@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+node_modules
+test
+*.log
+*.xlsx
+*.jpg
+*.png
+outputs

@@ -2,6 +2,8 @@
 
 This personal bot asks six questions in a private Telegram chat, fills the official postmatric recovery website, sends the CAPTCHA image, and submits when you reply with its text. On success it returns the latest password and the recovery slip. It uses Node.js, Playwright, and the Telegram Bot API. No AI subscription or public server is needed to run it on your PC.
 
+To run it continuously while your PC is off, follow [Deploy on Render](DEPLOY_RENDER.md). The included Dockerfile uses Chromium on Linux and reads secrets from the hosting environment.
+
 ## 1. Create your Telegram bot
 
 Open the official [@BotFather](https://t.me/BotFather) account in Telegram. Send `/newbot`, choose a name, and choose a unique username ending in `bot`. Copy the token BotFather supplies. Put it only in the local `.env` file below.
