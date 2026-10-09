@@ -105,6 +105,8 @@ For deployment diagnosis, temporarily set `PORTAL_STARTUP_CHECK=true`. Startup t
 npm.cmd test
 ```
 
+Use `npm.cmd run test:portal` for a live check of both Fresh and Renewal through all six questions to CAPTCHA capture. It uses synthetic data and a local Telegram adapter, never sends chat messages, and never submits recovery. Browser installation is required. A live Telegram/password reset test still needs the owner's real answers and CAPTCHA reply.
+
 The automated tests exercise input validation, owner-only access, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
 
 The live website field IDs and success/error text were observed during development. End-to-end Telegram operation requires your token and owner ID and has not been verified until those are configured. The Windows setup uses the installed Microsoft Edge to avoid a bundled browser download.

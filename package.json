@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --env-file=.env bot.mjs",
     "test": "node --test",
+    "test:portal": "node scripts/check-portal.mjs",
     "install-browser": "playwright install chromium"
   },
   "dependencies": { "playwright": "1.64.0" }
