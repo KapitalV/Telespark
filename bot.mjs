@@ -4,6 +4,7 @@ import {createHmac} from 'node:crypto';
 import {RecoveryBot} from './core.mjs';
 import {ScholarshipPortal} from './portal.mjs';
 import {createWebhookHandler} from './webhook.mjs';
+import {probePortal} from './probe.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -50,7 +51,9 @@ class Telegram {
 }
 
 const telegram = new Telegram();
-const bot = new RecoveryBot({telegram, allowedUserId:owner, portalFactory:() => new ScholarshipPortal({
+const bot = new RecoveryBot({telegram, allowedUserId:owner,
+  onDiagnostic:event => console.log(JSON.stringify(event)),
+  portalFactory:() => new ScholarshipPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
@@ -95,6 +98,9 @@ try {
     });
     ready = true;
     console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id and configure your owner ID.'} Webhook mode ready.`);
+    if (process.env.PORTAL_STARTUP_CHECK === 'true') {
+      console.log(JSON.stringify(await probePortal({headless:true,channel:process.env.BROWSER_CHANNEL || 'chromium'})));
+    }
   } else {
     const webhook = await telegram.api('getWebhookInfo',{});
     if (webhook.url) throw new Error('A webhook is configured for this token. Stop the cloud service and remove its webhook before switching to polling.');

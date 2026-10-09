@@ -80,6 +80,7 @@ After success, the bot sends your latest password and a PNG recovery slip. Repea
 | `/id` | Show your Telegram user ID for setup |
 | `/boards` | List supported board names |
 | `/refresh` | Refill the form and show a new CAPTCHA |
+| `/retry` | Retry a failed form load using the six saved answers |
 | `/result` | Resend the completed result without resetting the password |
 | `/cancel` | Close the browser session and clear the current details |
 | `/help` | Show commands |
@@ -95,6 +96,10 @@ CAPTCHA replies older than five minutes are not submitted. Idle sessions and com
 The bot is for your authorized account recovery. The website can change its fields, sessions, or verification flow; update `portal.mjs` if its layout changes. This version handles postmatric recovery; it does not decide scholarship eligibility or submit scholarship applications.
 
 ## Validation
+
+After the sixth answer, the bot acknowledges receipt before opening the website. Form preparation has a 75-second deadline. If loading or CAPTCHA delivery fails, `/retry` reuses the answers for up to 20 minutes without submitting a recovery. Failure messages and logs contain only the failed stage and a safe error category, never Playwright's raw messages or filled values.
+
+For deployment diagnosis, temporarily set `PORTAL_STARTUP_CHECK=true`. Startup then fills the six fields with synthetic values and captures the CAPTCHA, logs `portal-probe`, and closes the browser. This check never submits a CAPTCHA or changes a password. Remove the flag after diagnosis to avoid extra startup browser work.
 
 ```powershell
 npm.cmd test

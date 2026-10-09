@@ -131,3 +131,41 @@ test('Only the official result for the expected registration counts as success',
   assert.equal(parsePortalResult('https://scholarship.up.gov.in/ForgetPwd.aspx?a=c','Invalid Captcha...! Try Again.','').kind,'captcha');
   assert.equal(parsePortalResult('https://scholarship.up.gov.in/ForgetPwd.aspx?a=yr','High School Board year not matched...! Try Again.','').field,'year');
 });
+
+test('Slow form load is announced, bounded, and can be retried without six new answers', async () => {
+  const f = fixture();
+  const goodOpen = f.portal.open;
+  f.portal.open = () => new Promise(() => {});
+  f.bot.prepareTimeoutMs = 15;
+  const events = [];
+  f.bot.onDiagnostic = event => events.push(event);
+  await f.fill();
+  assert.match(f.messages.at(-2), /All six details received/);
+  assert.match(f.messages.at(-1), /TIMEOUT.*No recovery was submitted.*\/retry/);
+  assert.equal(f.bot.sessions.get(42).phase,'prepare-failed');
+  assert.equal(f.bot.sessions.get(42).details.year,'2021');
+  assert.equal(f.submissions.length,0);
+  f.portal.open = goodOpen;
+  await f.say('/retry');
+  assert.equal(f.bot.sessions.get(42).phase,'captcha');
+  assert.deepEqual(events,[{event:'prepare-failed',stage:'form',code:'TIMEOUT'},{event:'captcha-ready'}]);
+});
+
+test('A stuck browser cleanup cannot hide a form failure or expose applicant details', async () => {
+  const f = fixture();
+  f.portal.open = async () => { throw new Error('private applicant details'); };
+  f.portal.close = () => new Promise(() => {});
+  await f.fill();
+  assert.match(f.messages.at(-1), /form\/FAILED/);
+  assert.doesNotMatch(f.messages.join('\n'), /private applicant details/);
+  assert.equal(f.bot.sessions.get(42).phase,'prepare-failed');
+});
+
+test('CAPTCHA delivery failure retains answers and never submits', async () => {
+  const f = fixture();
+  f.telegram.photo = async () => {throw new Error('Telegram failed');};
+  await f.fill();
+  assert.match(f.messages.at(-1), /telegram-image\/FAILED/);
+  assert.equal(f.bot.sessions.get(42).phase,'prepare-failed');
+  assert.equal(f.submissions.length,0);
+});

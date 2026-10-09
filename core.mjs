@@ -72,12 +72,14 @@ export function parsePortalResult(url, text, expectedRegistration) {
 }
 
 export class RecoveryBot {
-  constructor({telegram, portalFactory, allowedUserId = '', clock = () => Date.now()}) {
+  constructor({telegram, portalFactory, allowedUserId = '', clock = () => Date.now(), prepareTimeoutMs = 75_000, onDiagnostic = () => {}}) {
     this.telegram = telegram;
     this.portalFactory = portalFactory;
     this.allowedUserId = String(allowedUserId);
     this.clock = clock;
     this.sessions = new Map();
+    this.prepareTimeoutMs = prepareTimeoutMs;
+    this.onDiagnostic = onDiagnostic;
   }
 
   async clear(chatId) {
@@ -105,7 +107,7 @@ export class RecoveryBot {
     await this.expire();
     if (command === '/cancel') { await this.clear(chatId); return send('Cancelled. Send /start for a new recovery.'); }
     if (command === '/boards') return send(BOARDS.join('\n'));
-    if (command === '/help') return send('/start — begin recovery\n/cancel — clear current details\n/refresh — get a new CAPTCHA\n/boards — supported Class 10 boards\n/result — resend the completed result\n/id — your Telegram user ID');
+    if (command === '/help') return send('/start — begin recovery\n/cancel — clear current details\n/retry — retry loading the form with your six answers\n/refresh — get a new CAPTCHA\n/boards — supported Class 10 boards\n/result — resend the completed result\n/id — your Telegram user ID');
     let state = this.sessions.get(chatId);
     if (command === '/start') {
       await this.clear(chatId);
@@ -122,6 +124,8 @@ export class RecoveryBot {
     if (state.phase === 'done') return send('Recovery already succeeded. Use /result to show it again. /start begins a new recovery and may replace that password.');
     if (state.phase === 'unknown') return send('A submission was attempted but its outcome could not be verified. Check the official portal before starting another recovery.');
     if (command === '/refresh' && state.phase === 'captcha') return this.prepare(chatId, state);
+    if (command === '/retry' && state.phase === 'prepare-failed') return this.prepare(chatId, state);
+    if (state.phase === 'prepare-failed') return send('Your six answers are saved. Send /retry to load the form again, or /start to change the details.');
     if (text.startsWith('/')) return send('Use /help for commands.');
     if (state.phase === 'questions' || state.phase === 'correction') {
       const field = state.phase === 'correction' ? state.correction : QUESTIONS[state.index][0];
@@ -175,16 +179,38 @@ export class RecoveryBot {
 
   async prepare(chatId, state) {
     state.phase = 'preparing';
+    let timer;
+    let stage = 'progress-message';
     try {
+      await this.telegram.send(chatId, 'All six details received. Loading the official website and CAPTCHA; this may take up to 75 seconds.');
       state.portal ??= this.portalFactory();
-      const image = await state.portal.open(state.details);
+      stage = 'form';
+      const image = await Promise.race([
+        state.portal.open(state.details),
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          const error = new Error('Preparation deadline'); error.code = 'TIMEOUT'; reject(error);
+        }, this.prepareTimeoutMs); }),
+      ]);
+      clearTimeout(timer);
+      stage = 'telegram-image';
       const sent = await this.telegram.photo(chatId, image, 'Type the CAPTCHA exactly as shown. Your reply submits this recovery request. /refresh gives a new image; /cancel stops.');
       state.captchaMessageId = sent.message_id;
       state.captchaAt = this.clock();
       state.phase = 'captcha';
-    } catch {
-      await this.clear(chatId);
-      await this.telegram.send(chatId, 'I could not load or fill the official recovery form. Check your internet connection, the website, and the selected board/year. No recovery was submitted. Send /start to try again.');
+      this.onDiagnostic({event:'captcha-ready'});
+    } catch (error) {
+      state.phase = 'prepare-failed';
+      const portal = state.portal;
+      state.portal = undefined;
+      // Cleanup must not prevent the user from receiving a failure message.
+      void portal?.close().catch(() => {});
+      const safeStage = ['browser','website','application-type','details','board','year','verify-fields','captcha'].includes(error.stage) ? error.stage : stage;
+      const safeCode = /^(?:ERR_[A-Z_]+|TIMEOUT)$/.test(error.code ?? '') ? error.code : 'FAILED';
+      this.onDiagnostic({event:'prepare-failed',stage:safeStage,code:safeCode});
+      await this.telegram.send(chatId, `Could not prepare the CAPTCHA (${safeStage}/${safeCode}). No recovery was submitted. Your six answers are saved for 20 minutes. Send /retry to try again, /start to change them, or /cancel to clear them.`);
+    } finally {
+      clearTimeout(timer);
+      state.updated = this.clock();
     }
   }
 

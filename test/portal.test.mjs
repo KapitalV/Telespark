@@ -1,6 +1,39 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {ScholarshipPortal} from '../portal.mjs';
+import {ScholarshipPortal, portalFailure} from '../portal.mjs';
+
+test('Portal diagnostics keep the stage and network category, never raw personal values', () => {
+  const error = portalFailure(new Error('net::ERR_CONNECTION_RESET secret-personal-value'), 'website');
+  assert.equal(error.code,'ERR_CONNECTION_RESET');
+  assert.equal(error.stage,'website');
+  assert.doesNotMatch(error.message,/secret-personal-value/);
+});
+
+test('Fresh application waits for its postback before filling details', async () => {
+  const portal = new ScholarshipPortal();
+  portal.browser = {};
+  const order = [];
+  const values = new Map();
+  let navigationDone;
+  const navigation = new Promise(resolve => {navigationDone = resolve;});
+  portal.page = {
+    goto:async () => ({status:() => 200}),
+    url:() => 'https://scholarship.up.gov.in/ForgetPwd.aspx',
+    waitForNavigation:async () => { await navigation; order.push('navigation'); },
+    waitForFunction:async () => {},
+    locator:id => ({
+      isChecked:async () => false,
+      check:async () => {setTimeout(navigationDone,10);},
+      fill:async value => {order.push('fill'); values.set(id,value);},
+      selectOption:async ({label}) => {values.set(id,label);},
+      inputValue:async () => values.get(id),
+      screenshot:async () => Buffer.from('image'),
+    }),
+  };
+  await portal.open({applicationType:'Fresh',registration:'000123456789',dob:'01/01/2000',board:'UP BOARD',year:'2021',roll:'001234567'});
+  assert.equal(order[0],'navigation');
+  assert.equal(values.get('#ContentPlaceHolder1_txtLogin'),'000123456789');
+});
 
 test('Verified recovered password survives failure to capture the optional slip', async () => {
   const portal = new ScholarshipPortal();
