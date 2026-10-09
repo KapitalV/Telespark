@@ -41,7 +41,9 @@ export class ScholarshipPortal {
       this.page.setDefaultNavigationTimeout(30_000);
     }
     this.stage = 'website';
-    const response = await this.page.goto(URL, {waitUntil:'domcontentloaded'});
+    // The form can be usable before all scripts finish loading. Do not make
+    // every recovery wait for unrelated resources to reach DOMContentLoaded.
+    const response = await this.page.goto(URL, {waitUntil:'commit'});
     if (response && response.status() >= 400) throw new Error('Website HTTP error');
     if (!this.page.url().startsWith('https://scholarship.up.gov.in/')) throw new Error('Unexpected destination.');
     const field = id => this.page.locator(`#ContentPlaceHolder1_${id}`);
