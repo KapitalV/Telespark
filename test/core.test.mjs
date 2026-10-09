@@ -48,6 +48,19 @@ test('Owner-only access: other people, groups, and setup mode cannot create reco
   assert.match(f.messages.at(-1),/42/);
 });
 
+test('Fresh asks for mobile number instead of DOB and reaches CAPTCHA after six answers', async () => {
+  const f = fixture();
+  for (const text of ['/start','Fresh','000123456789']) await f.say(text);
+  assert.match(f.messages.at(-1), /Registered mobile number/);
+  await f.say('01/01/2000');
+  assert.match(f.messages.at(-1), /10-digit mobile number/);
+  for (const text of ['0000000000','UP BOARD','2021','001234567']) await f.say(text);
+  assert.equal(f.opened[0].mobile,'0000000000');
+  assert.equal(f.opened[0].dob,undefined);
+  assert.equal(f.bot.sessions.get(42).phase,'captcha');
+  assert.equal(f.submissions.length,0);
+});
+
 test('All six answers fill the form once; CAPTCHA reply submits, then duplicate replies do not resubmit', async () => {
   const f = fixture([{kind:'success',registration:'000123456789',password:'Abc123'}]);
   await f.fill();

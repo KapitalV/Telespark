@@ -30,9 +30,11 @@ test('Fresh application waits for its postback before filling details', async ()
       screenshot:async () => Buffer.from('image'),
     }),
   };
-  await portal.open({applicationType:'Fresh',registration:'000123456789',dob:'01/01/2000',board:'UP BOARD',year:'2021',roll:'001234567'});
+  await portal.open({applicationType:'Fresh',registration:'000123456789',mobile:'0000000000',board:'UP BOARD',year:'2021',roll:'001234567'});
   assert.equal(order[0],'navigation');
   assert.equal(values.get('#ContentPlaceHolder1_txtLogin'),'000123456789');
+  assert.equal(values.get('#ContentPlaceHolder1_txtmobilenumber'),'0000000000');
+  assert.equal(values.has('#ContentPlaceHolder1_txtdob'),false);
 });
 
 test('Verified recovered password survives failure to capture the optional slip', async () => {

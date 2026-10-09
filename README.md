@@ -63,7 +63,7 @@ Send `/start` to your bot. It asks, in order:
 
 1. Fresh or Renewal
 2. Registration number for the required session
-3. Date of birth in DD/MM/YYYY
+3. Renewal: date of birth in DD/MM/YYYY. Fresh: registered 10-digit mobile number.
 4. Class 10 board (UP BOARD, CBSE, ICSE, or `/boards` for the full list)
 5. Class 10 passing year as entered in your original application
 6. Class 10 roll number, preserving leading zeros

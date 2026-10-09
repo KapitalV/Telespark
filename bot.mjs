@@ -99,7 +99,9 @@ try {
     ready = true;
     console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id and configure your owner ID.'} Webhook mode ready.`);
     if (process.env.PORTAL_STARTUP_CHECK === 'true') {
-      console.log(JSON.stringify(await probePortal({headless:true,channel:process.env.BROWSER_CHANNEL || 'chromium'})));
+      for (const applicationType of ['Renewal','Fresh']) {
+        console.log(JSON.stringify({...await probePortal({headless:true,channel:process.env.BROWSER_CHANNEL || 'chromium',applicationType}),applicationType}));
+      }
     }
   } else {
     const webhook = await telegram.api('getWebhookInfo',{});

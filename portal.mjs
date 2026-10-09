@@ -53,15 +53,17 @@ export class ScholarshipPortal {
       await Promise.all([this.page.waitForNavigation({waitUntil:'domcontentloaded'}), type.check()]);
     }
     this.stage = 'details';
+    const identityField = details.applicationType === 'Fresh' ? 'txtmobilenumber' : 'txtdob';
+    const identityValue = details.applicationType === 'Fresh' ? details.mobile : details.dob;
     await field('txtLogin').fill(details.registration);
-    await field('txtdob').fill(details.dob);
+    await field(identityField).fill(identityValue);
     this.stage = 'board';
     await field('ddl_board').selectOption({label:details.board});
     this.stage = 'year';
     await field('ddl_highschpassyear').selectOption({label:details.year});
     await field('txt_roll').fill(details.roll);
     this.stage = 'verify-fields';
-    for (const [id, expected] of [['txtLogin', details.registration], ['txtdob', details.dob], ['txt_roll', details.roll]]) {
+    for (const [id, expected] of [['txtLogin', details.registration], [identityField, identityValue], ['txt_roll', details.roll]]) {
       if (await field(id).inputValue() !== expected) throw new Error('Form value did not persist.');
     }
     if (await field('ddl_highschpassyear').inputValue() !== details.year) throw new Error('Year did not persist.');

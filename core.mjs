@@ -19,8 +19,19 @@ export const QUESTIONS = [
   ['roll', '6/6 — Class 10 roll number? Include any leading zeros.'],
 ];
 
+export function questionAt(index, details) {
+  if (index === 2 && details.applicationType === 'Fresh') {
+    return ['mobile','3/6 — Registered mobile number? Enter the 10-digit number recorded in your Fresh application.'];
+  }
+  return QUESTIONS[index];
+}
+
 export function normalizeAnswer(field, input) {
   const value = input.trim();
+  if (field === 'mobile') {
+    if (!/^\d{10}$/.test(value)) throw new Error('Enter the registered 10-digit mobile number, without +91 or spaces.');
+    return value;
+  }
   if (field === 'applicationType') {
     const type = value.toLowerCase();
     if (!['fresh', 'renewal'].includes(type)) throw new Error('Please type Fresh or Renewal.');
@@ -66,6 +77,7 @@ export function parsePortalResult(url, text, expectedRegistration) {
   if (/high school board year not matched/i.test(compact)) return {kind:'correction', field:'year', message:'The Class 10 passing year does not match. What year was entered in your original scholarship application?'};
   if (/high school (?:board )?roll (?:number|no).*not matched/i.test(compact)) return {kind:'correction', field:'roll', message:'The Class 10 roll number does not match. Send the correct number.'};
   if (/(?:date of birth|birth date|dob).*not matched/i.test(compact)) return {kind:'correction', field:'dob', message:'The date of birth does not match. Send the date recorded in your original application (DD/MM/YYYY).'};
+  if (/mobile.*not matched/i.test(compact)) return {kind:'correction', field:'mobile', message:'The registered mobile number does not match. Send the 10-digit number recorded in your Fresh application.'};
   if (/high school board not matched/i.test(compact)) return {kind:'correction', field:'board', message:'The Class 10 board does not match. Send the board recorded in your original application.'};
   if (/registration (?:number|no).*not (?:matched|found)/i.test(compact)) return {kind:'correction', field:'registration', message:'The registration number does not match. Send the correct number for this application and session.'};
   return {kind:'unknown'};
@@ -128,12 +140,12 @@ export class RecoveryBot {
     if (state.phase === 'prepare-failed') return send('Your six answers are saved. Send /retry to load the form again, or /start to change the details.');
     if (text.startsWith('/')) return send('Use /help for commands.');
     if (state.phase === 'questions' || state.phase === 'correction') {
-      const field = state.phase === 'correction' ? state.correction : QUESTIONS[state.index][0];
+      const field = state.phase === 'correction' ? state.correction : questionAt(state.index, state.details)[0];
       try { state.details[field] = normalizeAnswer(field, text); }
       catch (error) { return send(error.message); }
       if (state.phase === 'questions') {
         state.index++;
-        if (state.index < QUESTIONS.length) return send(QUESTIONS[state.index][1]);
+        if (state.index < QUESTIONS.length) return send(questionAt(state.index, state.details)[1]);
       }
       return this.prepare(chatId, state);
     }

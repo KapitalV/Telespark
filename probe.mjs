@@ -7,7 +7,7 @@ export async function probePortal(options = {}) {
   let timer;
   try {
     const image = await Promise.race([
-      portal.open({applicationType:'Renewal',registration:'000000000000000',dob:'01/01/2000',board:'UP BOARD',year:'2021',roll:'000000000'}),
+      portal.open({applicationType:options.applicationType || 'Renewal',registration:'000000000000000',dob:'01/01/2000',mobile:'0000000000',board:'UP BOARD',year:'2021',roll:'000000000'}),
       new Promise((_, reject) => {timer = setTimeout(() => {
         const error = new Error('Probe deadline'); error.code = 'TIMEOUT'; error.stage = portal.stage; reject(error);
       }, 75_000);}),
