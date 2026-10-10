@@ -60,7 +60,34 @@ export function readOtrDocument() {
   for (const e of document.querySelectorAll('input[readonly],input:disabled')) {
     if (visible(e) && otrLabel.test(label(e).trim()) && /^[A-Za-z0-9-]{8,30}$/.test(e.value.trim())) recoveryResults.push(e.value.trim());
   }
-  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined,recoveryResults:[...new Set(recoveryResults)]};
+  // Observed live recovery output: a dedicated finalotr_div containing an
+  // H3 "Your OTR is" label and an H1 identifier, rather than a table/textbox.
+  // Keep this scoped to that panel; unrelated page headings are not results.
+  const finalOtr = document.getElementById('ContentPlaceHolder1_finalotr_div');
+  if (location.pathname.toLowerCase() === '/forgetotr.aspx' && finalOtr && visible(finalOtr)) {
+    const labelled = Array.from(finalOtr.querySelectorAll('h3')).some(e => visible(e) && /^your\s+otr\s+is\s*[:：]?$/i.test(e.innerText.trim()));
+    if (labelled) {
+      for (const e of finalOtr.querySelectorAll('h1')) {
+        const value = e.innerText.trim();
+        if (visible(e) && /^(?=.*\d)[A-Za-z0-9-]{8,30}$/.test(value)) recoveryResults.push(value);
+      }
+    }
+  }
+  // Kept only in this in-memory snapshot. Diagnostics reduce these blocks to
+  // an allowlisted vocabulary and number lengths; raw page text is never logged.
+  const resultBlocks = [];
+  if (fields.length === 0) {
+    const seen = new Set();
+    for (const e of document.querySelectorAll('body,main,section,div,h1,h2,h3,h4,p,span,label,td,dd,output')) {
+      if (!visible(e)) continue;
+      const value = e.innerText.trim();
+      if (!value || value.length > 500 || seen.has(value)) continue;
+      seen.add(value);
+      resultBlocks.push({tag:e.tagName,id:e.id,text:value});
+      if (resultBlocks.length >= 40) break;
+    }
+  }
+  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined,recoveryResults:[...new Set(recoveryResults)],resultBlocks};
 }
 
 export class OtrPortal {
@@ -127,6 +154,7 @@ export class OtrPortal {
       this.dialogError = undefined;
     }
     if (step.kind === 'unsupported') this.report(otrDiagnostic(snapshot,step.reason));
+    if (step.kind === 'success') this.report({event:'otr-result-recognized',mode:this.mode});
     if (step.kind === 'form' && step.fields.some(f => f.type === 'captcha')) step.image = await this.captchaImage();
     this.step = step;
     return step;

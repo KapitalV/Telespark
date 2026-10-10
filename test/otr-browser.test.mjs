@@ -54,6 +54,54 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     await f.portal.close();
   });
 
+  await t.test('Observed finalotr_div result after OTP and a second CAPTCHA reaches Telegram',async () => {
+    // Layout observed in the user's live post-verification response on 2026-10-10.
+    // All identifiers and answers in this fixture are synthetic.
+    const observedResult = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is</h3><h1>UP26AB0000000001</h1></div>');
+    const verify = otpPage(image + input('ContentPlaceHolder1_txtCaptcha','Captcha'));
+    const f = await fixture('recover',(_request,_url,posts) => posts.length === 0 ? initial : posts.length === 1 ? verify : observedResult);
+    let outgoing = 100, incoming = 1;
+    const sent = [];
+    const telegram = {
+      send:async (_id,text,options) => {sent.push({text,options}); return {message_id:outgoing++};},
+      photo:async () => ({message_id:outgoing++}),
+    };
+    const otr = new OtrBot({telegram,allowedUserId:'42',portalFactory:() => f.portal});
+    const router = new BotRouter({telegram,allowedUserId:'42',enableOtr:true,otr,recovery:{clear:async()=>{},expire:async()=>{}}});
+    const say = text => router.handle({from:{id:42},chat:{id:42,type:'private'},message_id:incoming++,text});
+    for (const text of ['/start','2','1','9876543210','AbC12','001234']) await say(text);
+    assert.equal(f.posts.length,1,'OTP is not submitted before the second CAPTCHA answer');
+    await say('XyZ34');
+    assert.equal(otr.sessions.get(42).phase,'done');
+    assert.match(sent.at(-1).text,/UP26AB0000000001/);
+    assert.equal(sent.at(-1).options.protect_content,true);
+    assert.equal(f.posts[1].get('otp'),'001234');
+    assert.equal(f.posts[1].get('ContentPlaceHolder1_txtCaptcha'),'XyZ34');
+    await say('/result');
+    assert.equal(f.posts.length,2,'Re-delivery must not make a third POST');
+  });
+
+  await t.test('Final recovery panel ignores hidden, unlabelled, conflicting and premature outputs',async () => {
+    const good = '<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is:</h3><h1>UP26AB0000000001</h1></div>';
+    const f = await fixture('recover',() => page(good));
+    assert.notEqual((await f.portal.open()).kind,'success','A result must follow verification in this session');
+    f.portal.verificationSubmitted = true;
+    assert.equal((await f.portal.read()).kind,'success');
+    for (const html of [
+      good.replace('id="ContentPlaceHolder1_finalotr_div"','id="ContentPlaceHolder1_finalotr_div" style="display:none"'),
+      good.replace('Your OTR is:','Registered mobile number'),
+      good.replace('ContentPlaceHolder1_finalotr_div','unrelated'),
+      good.replace('UP26AB0000000001','Unavailable'),
+      good.replace('</div>','<h1>UP26AB0000000002</h1></div>'),
+      good + input('otp','OTP'),
+      good + '<p>Invalid OTP</p>',
+    ]) {
+      await f.portal.page.setContent(page(html));
+      assert.notEqual((await f.portal.read()).kind,'success');
+    }
+    assert.equal(f.posts.length,0);
+  });
+
   await t.test('CAPTCHA refresh changes the image without a form POST',async () => {
     const f = await fixture('recover',() => initial);
     const step = await f.portal.open();

@@ -10,7 +10,8 @@ Registration continues to use its separate existing adapter.
    rejection retains the mobile number in this session instead of asking again.
 3. Request an OTP once and wait for the website's OTP form. Recognize both Hindi
    and English verification controls, including a masked OTP input.
-4. Submit the user-entered OTP once and return a clearly labelled OTR result.
+4. Collect the OTP and the second CAPTCHA shown by the portal, then submit once
+   and return a clearly labelled OTR result.
    Accept a result only after this same browser session submitted verification.
 5. `/result` re-delivers the result without another website request. Cancellation,
    expiry, completion, and uncertain outcomes clear the saved mobile number.
@@ -20,44 +21,37 @@ sent notices are distinguished from invalid/expired OTP errors. An unavailable
 resend control reports that no new OTP was requested. Duplicate replies and
 uncertain outcomes never trigger automatic repeated submission.
 
-## Verification, 2026-10-10
+## Result-page fix, 2026-10-10
 
-- **60 automated tests passed, none skipped** with `OTR_BROWSER_TESTS=true`.
-- These include the Telegram menu/router and conversation handlers connected to
-  a real Edge browser with intercepted website responses. The recovery scenario
-  exercises mobile -> CAPTCHA refresh -> Hindi masked OTP -> inline/read-only
-  OTR result, plus `/result` without another POST.
-- Existing password recovery and registration contract tests also passed.
-- These simulations do **not** prove real Telegram delivery, SMS delivery, or
-  successful recovery from the live government database.
-- Both live public-page checks returned **HTTP 503 Service Unavailable**, including
-  the final retry. No real mobile number, CAPTCHA answer, or OTP was submitted.
+The user's live Telegram attempt reached OTP verification and a second CAPTCHA.
+Its response stayed on `/ForgetOTR.aspx`, with no editable fields or buttons.
+The page displayed `ContentPlaceHolder1_finalotr_div`, an H3 "Your OTR is"
+heading, and an H1 identifier. The previous reader only recognized other output
+labels/layouts, missed this final panel, and returned `OTR-FIELDS`.
+
+The reader now recognizes the observed final panel. The panel and heading must
+be visible and correctly labelled, its identifier must match the expected
+character pattern, and the existing verification/session/error checks still
+apply. Unrelated headings, hidden panels, conflicting numbers, remaining input
+fields, and results before OTP verification do not count as success.
+
+The regression fixture uses this observed DOM layout with invented values. It
+failed with `unsupported` before the change, then passed after it. It exercises
+the Telegram router, mobile/CAPTCHA, OTP/second CAPTCHA, result delivery, and
+`/result` without a third POST. It is not a replay of private applicant data.
+
+Verification: `OTR_BROWSER_TESTS=true npm test` passed all 64 tests, none skipped,
+including the existing password recovery, registration, and webhook tests.
+
+Diagnostics retain control IDs, operational keywords, and digit-group lengths;
+they exclude raw page text, actual numbers, answers, cookies, and URL queries.
+Recognized results emit only `otr-result-recognized` and the module name.
 
 ## Remaining live acceptance
 
-After the official website is available, use the updated bot in the private
-owner chat: `/start` -> `2. OTR` -> `1. Recover OTR`. Enter your registered mobile,
-answer the current CAPTCHA, and provide the SMS OTP. Compare the returned OTR
-with the official result/SMS. The running process must be restarted to load
-updated source files; changing files alone does not replace its loaded modules.
-
-Do not call live recovery verified until this acceptance step succeeds. No
-production restart, webhook change, GitHub push, or deployment is part of this
-local merge.
-
-## Post-CAPTCHA failure investigation, 2026-10-10
-
-The official public recovery form loads again. The reported failure after
-verification has not yet been reproduced with a live applicant session.
-Unsupported responses now display a specific `OTR-ACTION`, `OTR-FIELDS`,
-`OTR-DIALOG`, or other bounded code instead of attributing every failure to
-external verification. Portal diagnostics log control IDs, types, and a closed
-vocabulary of operational words; no raw dialog text, applicant values, result
-numbers, cookies, or URLs are logged. These changes diagnose the failure; they
-do not establish a fix for the unobserved protected response.
-
-Validation: 62 automated tests passed, including browser contract tests and
-existing password recovery tests. Live read-only checks reached the recovery
-mobile/CAPTCHA form and registration declaration. A real Telegram attempt is
-still required. Stop the existing update consumer before running the local bot;
-never run polling consumers on Windows and a server simultaneously.
+The updated Windows bot must complete one more user-driven attempt through
+`/start` -> `2. OTR` -> `1. Recover OTR` to confirm delivery of the live result.
+The observed failure is reproduced and fixed in the browser regression test;
+successful delivery by the updated live bot must be confirmed separately.
+Only one process should consume updates for this Telegram token. A polling
+409 diagnostic means another consumer is running locally or on another host.

@@ -36,7 +36,7 @@ class Telegram {
     let data;
     try { data = await response.json(); }
     catch { throw new Error('Telegram returned an unreadable response.'); }
-    if (!data.ok) throw new Error(`Telegram request failed (${data.error_code ?? response.status}).`);
+    if (!data.ok) throw Object.assign(new Error(`Telegram request failed (${data.error_code ?? response.status}).`),{telegramCode:data.error_code ?? response.status});
     return data.result;
   }
   send(chatId, text, options = {}) {
@@ -139,8 +139,11 @@ try {
         }
       }
       await bot.expire();
-    } catch {
-      console.error('Telegram polling interrupted. Reconnecting in five seconds.');
+    } catch (error) {
+      const code = Number.isInteger(error?.telegramCode) ? error.telegramCode : undefined;
+      console.error(code === 409
+        ? 'Telegram polling conflict (409): another instance is using this bot token. Run only one bot instance.'
+        : `Telegram polling interrupted${code ? ` (${code})` : ''}. Reconnecting in five seconds.`);
       await delay(5000);
     }
   }
