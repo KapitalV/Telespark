@@ -49,6 +49,13 @@ the exact text mismatch was not established. The follow-up reader supports
 trailing heading punctuation and identifier separators without changing the
 displayed number. Additional diagnostics preserve masked character shapes.
 
+Those diagnostics then isolated the remaining mismatch: the live H3 contains a
+longer success notice followed by the final sentence "Your OTR is-". The reader
+had anchored that label to the start of the whole H3. It now recognizes the
+final labelled sentence after the preceding notice. The live identifier shape
+was `XX##-##########`, already supported by the identifier validator. The browser
+regression now includes a preceding notice and that identifier shape.
+
 If the same verified, explicitly labelled final panel has exactly one bounded
 numeric identifier in an unfamiliar format, the bot returns a protected crop
 of that panel instead of guessing its number or throwing away the result.

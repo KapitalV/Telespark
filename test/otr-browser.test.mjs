@@ -57,7 +57,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
   await t.test('Observed finalotr_div result after OTP and a second CAPTCHA reaches Telegram',async () => {
     // Layout observed in the user's live post-verification response on 2026-10-10.
     // All identifiers and answers in this fixture are synthetic.
-    const observedResult = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is :-</h3><h1>UP26/0000000001</h1></div>');
+    const observedResult = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR has been recovered successfully. Your OTR is-</h3><h1>UP26-0000000001</h1></div>');
     const verify = otpPage(image + input('ContentPlaceHolder1_txtCaptcha','Captcha'));
     const f = await fixture('recover',(_request,_url,posts) => posts.length === 0 ? initial : posts.length === 1 ? verify : observedResult);
     let outgoing = 100, incoming = 1;
@@ -73,7 +73,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     assert.equal(f.posts.length,1,'OTP is not submitted before the second CAPTCHA answer');
     await say('XyZ34');
     assert.equal(otr.sessions.get(42).phase,'done');
-    assert.ok(sent.at(-1).text.includes('UP26/0000000001'));
+    assert.ok(sent.at(-1).text.includes('UP26-0000000001'));
     assert.equal(sent.at(-1).options.protect_content,true);
     assert.equal(f.posts[1].get('otp'),'001234');
     assert.equal(f.posts[1].get('ContentPlaceHolder1_txtCaptcha'),'XyZ34');
@@ -118,7 +118,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     const f = await fixture('recover',() => initial);
     await f.portal.open();
     f.portal.verificationSubmitted = true;
-    for (const [heading,value] of [['Your OTR is :-','UP26/0000000001'],['Your OTR is —','UP26-0000000001'],['Your OTR is：','UP26 0000000001']]) {
+    for (const [heading,value] of [['Your OTR is :-','UP26/0000000001'],['Your OTR is —','UP26-0000000001'],['Your OTR is：','UP26 0000000001'],['Your OTR has been recovered successfully. Your OTR is-','UP26-0000000001']]) {
       await f.portal.page.setContent(page(`<div id="ContentPlaceHolder1_finalotr_div"><h3>${heading}</h3><h1>${value}</h1></div>`));
       assert.deepEqual(await f.portal.read(),{kind:'success',otr:value});
     }

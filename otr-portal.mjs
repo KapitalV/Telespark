@@ -67,7 +67,8 @@ export function readOtrDocument() {
   let recoveryPanel;
   if (location.pathname.toLowerCase() === '/forgetotr.aspx' && finalOtr && visible(finalOtr)) {
     const headings = Array.from(finalOtr.querySelectorAll('h3')).filter(visible).map(e => e.innerText.trim());
-    const labelled = headings.some(value => /^your\s+otr\s+is[\s\p{P}]*$/iu.test(value.normalize('NFKC')));
+    // The live heading contains a success notice before its final label sentence.
+    const labelled = headings.some(value => /(?:^|[.!?]\s*)your\s+otr\s+is[\s\p{P}]*$/iu.test(value.normalize('NFKC')));
     const values = Array.from(finalOtr.querySelectorAll('h1')).filter(visible).map(e => e.innerText.trim());
     recoveryPanel = {labelled,headings,values};
     if (labelled) {
