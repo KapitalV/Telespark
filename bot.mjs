@@ -5,6 +5,9 @@ import {RecoveryBot} from './core.mjs';
 import {ScholarshipPortal} from './portal.mjs';
 import {createWebhookHandler} from './webhook.mjs';
 import {probePortal, probeConnection} from './probe.mjs';
+import {BotRouter} from './router.mjs';
+import {OtrBot} from './otr-core.mjs';
+import {OtrPortal} from './otr-portal.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -51,16 +54,26 @@ class Telegram {
 }
 
 const telegram = new Telegram();
-const bot = new RecoveryBot({telegram, allowedUserId:owner,
+const recovery = new RecoveryBot({telegram, allowedUserId:owner,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:() => new ScholarshipPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
+const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new OtrPortal({
+  mode,
+  headless:process.env.HEADLESS !== 'false',
+  channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
+})});
+const bot = new BotRouter({telegram, recovery, otr, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
+// Expire sensitive in-memory sessions even when no webhook messages arrive.
+const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
+cleanupTimer.unref();
 let stopping = false;
 let webhookServer;
 async function shutdown() {
   stopping = true;
+  clearInterval(cleanupTimer);
   webhookServer?.close();
   for (const chatId of bot.sessions.keys()) await bot.clear(chatId);
   process.exit(0);
@@ -131,6 +144,7 @@ try {
   }
   }
 } catch (error) {
+  clearInterval(cleanupTimer);
   console.error(error.message);
   webhookServer?.close();
   process.exitCode = 1;

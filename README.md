@@ -114,3 +114,35 @@ The live website field IDs and success/error text were observed during developme
 API documentation: https://core.telegram.org/bots/api#getupdates
 
 Browser automation documentation: https://playwright.dev/docs/library
+
+# Experimental OTR modules
+
+`/start` now offers **1. Password recovery** and **2. OTR**. Password recovery
+retains its existing six-question flow. OTR is off unless `ENABLE_OTR=true`.
+Its submenu offers **Recover OTR**, **Register OTR**, and **Back**.
+
+The OTR handler asks for fields from the current official form, shows CAPTCHA
+images for the user to answer, accepts SMS OTPs, and preserves the browser
+session between steps. Registration requires explicit agreement to the current
+portal declaration and a separate `CONFIRM` before a recognized final submission.
+`/menu` and `/cancel` clear the current session. `/retry` retries a failed page
+load or re-delivers the current prompt; `/refresh` refreshes a CAPTCHA;
+`/resend` uses an enabled portal resend control after a minimum 60-second local
+cooldown; `/result` re-delivers a verified result without a new submission.
+
+**Status:** experimental, approved for local merge by the owner before manual
+testing; not deployed. The public recovery form
+and registration declaration have been checked live without OTP requests.
+OTP-protected recovery results, Aadhaar e-KYC, and final registration have only
+synthetic contract coverage, not live end-to-end verification. Recognized fields
+and actions can continue in Telegram; unexpected controls, external identity
+provider steps, and ambiguous outcomes stop safely. Do not describe this as a
+fully verified registration service until the manual Telegram test passes.
+
+The bot remains owner-only and private-chat-only. It stores OTR session values
+in memory, clears OTP inputs after each attempted submission, closes idle
+sessions after 20 minutes, and does not log submitted values. Telegram messages
+themselves still exist in the chat; session cleanup does not delete chat history.
+
+See [OTR_TESTING.md](OTR_TESTING.md) for checks, the later manual test, and
+rollback. Local merge approval does not itself authorize a deployment.
