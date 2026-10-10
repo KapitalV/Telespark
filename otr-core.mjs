@@ -32,7 +32,7 @@ export class OtrBot {
     if (state) {
       state.values = {};
       state.savedMobile = undefined;
-      state.result = state.step = undefined;
+      state.result = state.resultImage = state.step = undefined;
       const portal = state.portal;
       state.portal = undefined;
       // A hung browser close must not hold cancellation or idle cleanup hostage.
@@ -112,8 +112,9 @@ export class OtrBot {
       return this.prompt(id, state);
     }
     if (step?.kind === 'unknown') return this.stop(id, state, 'unknown', 'The request outcome is uncertain. Check the official website or SMS before starting again. I will not repeat the submission.');
-    if (step?.kind === 'success') {
+    if (step?.kind === 'success' || step?.kind === 'result-image') {
       state.result = step.otr;
+      state.resultImage = step.image;
       state.phase = 'done';
       state.values = {};
       state.savedMobile = undefined;
@@ -166,6 +167,7 @@ export class OtrBot {
   }
 
   async deliver(id, state) {
+    if (state.resultImage) return this.telegram.photo(id, state.resultImage, 'The official website displayed this OTR recovery result. Keep the number shown in this image safely.', {protect_content:true});
     return this.telegram.send(id, `The official website confirmed your OTR: ${state.result}\nKeep this number safely.`, {protect_content:true});
   }
 
@@ -181,7 +183,7 @@ export class OtrBot {
     const text = message.text.trim();
     const command = text.toLowerCase();
     if (command === '/cancel') { await this.clear(id); return this.telegram.send(id, 'Cancelled. Details cleared.'); }
-    if (command === '/result' && state.result) return this.deliver(id, state);
+    if (command === '/result' && (state.result || state.resultImage)) return this.deliver(id, state);
     if (state.phase === 'done') return this.telegram.send(id, 'OTR already confirmed. /result shows it again; /menu returns to the menu.');
     if (['unknown','unsupported','blocked'].includes(state.phase)) return this.telegram.send(id, 'This session has stopped. Check the official website or SMS before beginning another request. Use /menu.');
     if (command === '/retry' && state.phase === 'load-failed') return this.open(id, state);

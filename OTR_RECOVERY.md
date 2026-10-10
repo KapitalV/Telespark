@@ -40,8 +40,21 @@ failed with `unsupported` before the change, then passed after it. It exercises
 the Telegram router, mobile/CAPTCHA, OTP/second CAPTCHA, result delivery, and
 `/result` without a third POST. It is not a replay of private applicant data.
 
-Verification: `OTR_BROWSER_TESTS=true npm test` passed all 64 tests, none skipped,
+Verification: `OTR_BROWSER_TESTS=true npm test` passed all 67 tests, none skipped,
 including the existing password recovery, registration, and webhook tests.
+
+The initial panel reader still failed on a subsequent live attempt. Its masked
+keyword diagnostics did not preserve punctuation or identifier separators, so
+the exact text mismatch was not established. The follow-up reader supports
+trailing heading punctuation and identifier separators without changing the
+displayed number. Additional diagnostics preserve masked character shapes.
+
+If the same verified, explicitly labelled final panel has exactly one bounded
+numeric identifier in an unfamiliar format, the bot returns a protected crop
+of that panel instead of guessing its number or throwing away the result.
+This fallback rejects active input forms, error states, external pages, and
+ambiguous/conflicting results. The image remains in memory for `/result` and is
+cleared on cancellation or expiry; no image or applicant value is logged.
 
 Diagnostics retain control IDs, operational keywords, and digit-group lengths;
 they exclude raw page text, actual numbers, answers, cookies, and URL queries.
@@ -51,7 +64,7 @@ Recognized results emit only `otr-result-recognized` and the module name.
 
 The updated Windows bot must complete one more user-driven attempt through
 `/start` -> `2. OTR` -> `1. Recover OTR` to confirm delivery of the live result.
-The observed failure is reproduced and fixed in the browser regression test;
-successful delivery by the updated live bot must be confirmed separately.
+The result-panel and formatting cases pass browser regression tests;
+successful delivery by this updated live bot must be confirmed separately.
 Only one process should consume updates for this Telegram token. A polling
 409 diagnostic means another consumer is running locally or on another host.

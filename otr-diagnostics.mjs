@@ -18,5 +18,14 @@ export function otrDiagnostic(snapshot, reason) {
     externalFrame:!!snapshot.externalFrame,
     resultCount:new Set([snapshot.result,...(snapshot.recoveryResults ?? [])].filter(Boolean)).size,
     content:(snapshot.resultBlocks ?? []).map(b => ({tag:b.tag,id:controlId(b.id),words:diagnosticWords(b.text),numberLengths:[...b.text.matchAll(/\d+/g)].map(m => m[0].length)})),
+    panel:snapshot.recoveryPanel ? {
+      labelled:snapshot.recoveryPanel.labelled,
+      headingShapes:snapshot.recoveryPanel.headings.map(maskTextShape),
+      valueShapes:snapshot.recoveryPanel.values.map(maskTextShape),
+    } : undefined,
   };
+}
+
+export function maskTextShape(text) {
+  return text.slice(0,100).replace(/[\p{L}\p{M}]/gu,'X').replace(/\p{N}/gu,'#');
 }

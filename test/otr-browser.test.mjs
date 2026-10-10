@@ -57,7 +57,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
   await t.test('Observed finalotr_div result after OTP and a second CAPTCHA reaches Telegram',async () => {
     // Layout observed in the user's live post-verification response on 2026-10-10.
     // All identifiers and answers in this fixture are synthetic.
-    const observedResult = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is</h3><h1>UP26AB0000000001</h1></div>');
+    const observedResult = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is :-</h3><h1>UP26/0000000001</h1></div>');
     const verify = otpPage(image + input('ContentPlaceHolder1_txtCaptcha','Captcha'));
     const f = await fixture('recover',(_request,_url,posts) => posts.length === 0 ? initial : posts.length === 1 ? verify : observedResult);
     let outgoing = 100, incoming = 1;
@@ -73,12 +73,23 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     assert.equal(f.posts.length,1,'OTP is not submitted before the second CAPTCHA answer');
     await say('XyZ34');
     assert.equal(otr.sessions.get(42).phase,'done');
-    assert.match(sent.at(-1).text,/UP26AB0000000001/);
+    assert.ok(sent.at(-1).text.includes('UP26/0000000001'));
     assert.equal(sent.at(-1).options.protect_content,true);
     assert.equal(f.posts[1].get('otp'),'001234');
     assert.equal(f.posts[1].get('ContentPlaceHolder1_txtCaptcha'),'XyZ34');
     await say('/result');
     assert.equal(f.posts.length,2,'Re-delivery must not make a third POST');
+  });
+
+  await t.test('Unfamiliar formatting in the verified final panel returns a result image',async () => {
+    const output = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is :-</h3><h1>(UP26/0000000001)</h1></div>');
+    const f = await fixture('recover',(_request,_url,posts) => posts.length === 0 ? initial : posts.length === 1 ? otpPage() : output);
+    let step = await f.portal.open();
+    step = await f.portal.submit({ContentPlaceHolder1_txt_mobile:'9876543210',ContentPlaceHolder1_txtCaptcha:'AbC12'},step.fingerprint);
+    step = await f.portal.submit({otp:'001234'},step.fingerprint);
+    assert.equal(step.kind,'result-image');
+    assert.ok(step.image.length > 0);
+    assert.equal(f.posts.length,2);
   });
 
   await t.test('Final recovery panel ignores hidden, unlabelled, conflicting and premature outputs',async () => {
@@ -90,6 +101,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     for (const html of [
       good.replace('id="ContentPlaceHolder1_finalotr_div"','id="ContentPlaceHolder1_finalotr_div" style="display:none"'),
       good.replace('Your OTR is:','Registered mobile number'),
+      good.replace('Your OTR is:','Your OTR is invalid'),
       good.replace('ContentPlaceHolder1_finalotr_div','unrelated'),
       good.replace('UP26AB0000000001','Unavailable'),
       good.replace('</div>','<h1>UP26AB0000000002</h1></div>'),
@@ -98,6 +110,17 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     ]) {
       await f.portal.page.setContent(page(html));
       assert.notEqual((await f.portal.read()).kind,'success');
+    }
+    assert.equal(f.posts.length,0);
+  });
+
+  await t.test('Final heading punctuation and identifier separators preserve the displayed identifier',async () => {
+    const f = await fixture('recover',() => initial);
+    await f.portal.open();
+    f.portal.verificationSubmitted = true;
+    for (const [heading,value] of [['Your OTR is :-','UP26/0000000001'],['Your OTR is —','UP26-0000000001'],['Your OTR is：','UP26 0000000001']]) {
+      await f.portal.page.setContent(page(`<div id="ContentPlaceHolder1_finalotr_div"><h3>${heading}</h3><h1>${value}</h1></div>`));
+      assert.deepEqual(await f.portal.read(),{kind:'success',otr:value});
     }
     assert.equal(f.posts.length,0);
   });

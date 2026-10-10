@@ -50,7 +50,7 @@ class Telegram {
     for (const [key,value] of Object.entries(options)) form.set(key,String(value));
     return this.api(method,form,true);
   }
-  photo(chatId, bytes, caption) { return this.upload('sendPhoto','photo',chatId,bytes,'Captcha.png',caption); }
+  photo(chatId, bytes, caption, options) { return this.upload('sendPhoto','photo',chatId,bytes,'Image.png',caption,options); }
   document(chatId, bytes, filename, caption, options) { return this.upload('sendDocument','document',chatId,bytes,filename,caption,options); }
 }
 

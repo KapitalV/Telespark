@@ -30,7 +30,7 @@ export function classifyRecovery(snapshot, {verificationSubmitted = false} = {})
   let url;
   try { url = new URL(snapshot.url); } catch { return {kind:'unsupported',reason:'page'}; }
   if (url.origin !== OTR_ORIGIN || snapshot.externalFrame) return {kind:'unsupported',reason:'external-verification'};
-  const candidates = [...new Set([snapshot.result,...(snapshot.recoveryResults ?? [])].filter(value => typeof value === 'string' && /^[A-Za-z0-9-]{8,30}$/.test(value)))];
+  const candidates = [...new Set([snapshot.result,...(snapshot.recoveryResults ?? [])].filter(value => typeof value === 'string' && (/^[A-Za-z0-9-]{8,30}$/.test(value) || /^(?=.{8,64}$)(?=.*\d{8})[A-Za-z0-9]+(?:[ /\-\u2010-\u2015][A-Za-z0-9]+)*$/u.test(value))))];
   // A labelled value is only a result after this session actually submitted
   // OTP verification, and never while a verification input/error remains.
   if (verificationSubmitted && candidates.length === 1 && !snapshot.error && snapshot.fields.length === 0) {
@@ -47,6 +47,21 @@ export class OtrRecoveryPortal extends OtrPortal {
   constructor(options = {}) { super({...options,mode:'recover'}); this.verificationSubmitted = false; }
   async snapshot() { return normalizeRecoverySnapshot(await super.snapshot()); }
   classify(snapshot) { return classifyRecovery(snapshot,{verificationSubmitted:this.verificationSubmitted}); }
+  async read() {
+    const step = await super.read();
+    if (step.kind !== 'unsupported' || step.reason !== 'fields' || !this.verificationSubmitted || this.externalBlocked) return step;
+    const snapshot = await this.snapshot();
+    const panel = snapshot.recoveryPanel;
+    // Preserve a readable official result if its identifier uses an unfamiliar
+    // format. This is a crop of the verified, explicitly labelled final panel,
+    // not a screenshot of an unknown verification form or a guessed identifier.
+    if (snapshot.url === `${OTR_ORIGIN}/ForgetOTR.aspx` && !snapshot.externalFrame && !snapshot.error && !snapshot.fields.length && !snapshot.result && !snapshot.recoveryResults?.length && panel?.labelled && panel.values.length === 1 && panel.values[0].length <= 80 && /\d{8}/.test(panel.values[0])) {
+      const image = await this.page.locator('#ContentPlaceHolder1_finalotr_div').screenshot({type:'png'});
+      this.report({event:'otr-result-image',mode:'recover'});
+      return {kind:'result-image',image};
+    }
+    return step;
+  }
   beforeSubmit(step) { if (step.action.kind === 'verify-otp') this.verificationSubmitted = true; }
   async performSubmit(step) {
     const pathname = new URL(this.page.url()).pathname;

@@ -64,12 +64,15 @@ export function readOtrDocument() {
   // H3 "Your OTR is" label and an H1 identifier, rather than a table/textbox.
   // Keep this scoped to that panel; unrelated page headings are not results.
   const finalOtr = document.getElementById('ContentPlaceHolder1_finalotr_div');
+  let recoveryPanel;
   if (location.pathname.toLowerCase() === '/forgetotr.aspx' && finalOtr && visible(finalOtr)) {
-    const labelled = Array.from(finalOtr.querySelectorAll('h3')).some(e => visible(e) && /^your\s+otr\s+is\s*[:：]?$/i.test(e.innerText.trim()));
+    const headings = Array.from(finalOtr.querySelectorAll('h3')).filter(visible).map(e => e.innerText.trim());
+    const labelled = headings.some(value => /^your\s+otr\s+is[\s\p{P}]*$/iu.test(value.normalize('NFKC')));
+    const values = Array.from(finalOtr.querySelectorAll('h1')).filter(visible).map(e => e.innerText.trim());
+    recoveryPanel = {labelled,headings,values};
     if (labelled) {
-      for (const e of finalOtr.querySelectorAll('h1')) {
-        const value = e.innerText.trim();
-        if (visible(e) && /^(?=.*\d)[A-Za-z0-9-]{8,30}$/.test(value)) recoveryResults.push(value);
+      for (const value of values) {
+        if (/^(?=.{8,64}$)(?=.*\d{8})[A-Za-z0-9]+(?:[ /\-\u2010-\u2015][A-Za-z0-9]+)*$/u.test(value)) recoveryResults.push(value);
       }
     }
   }
@@ -87,7 +90,7 @@ export function readOtrDocument() {
       if (resultBlocks.length >= 40) break;
     }
   }
-  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined,recoveryResults:[...new Set(recoveryResults)],resultBlocks};
+  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined,recoveryResults:[...new Set(recoveryResults)],resultBlocks,recoveryPanel};
 }
 
 export class OtrPortal {

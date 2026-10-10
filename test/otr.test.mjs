@@ -52,6 +52,24 @@ test('Unsupported responses expose a bounded diagnostic code without portal data
   assert.doesNotMatch(g.sent.at(-1).text,/001234/);
 });
 
+test('Official result image is protected, re-delivered without submission, and cleared on cancellation', async () => {
+  const bytes = Buffer.from('synthetic official result image');
+  const f = fixture([{kind:'result-image',image:bytes}]);
+  const photos = [];
+  f.telegram.photo = async (_id,image,caption,options) => {photos.push({image,caption,options}); return {message_id:200};};
+  await f.bot.start(42,'recover');
+  await f.say('9876543210'); await f.say('AbC12');
+  assert.equal(f.bot.sessions.get(42).phase,'done');
+  assert.equal(photos.at(-1).options.protect_content,true);
+  assert.equal(photos.at(-1).image,bytes);
+  await f.say('/result');
+  assert.equal(f.submits.length,1);
+  assert.equal(photos.at(-1).image,bytes);
+  const state = f.bot.sessions.get(42);
+  await f.say('/cancel');
+  assert.equal(state.resultImage,undefined);
+});
+
 test('OTR validates mobile, OTP, Aadhaar, dates and preserves leading zeros', () => {
   assert.equal(normalizeOtrAnswer(otp,'001234'),'001234');
   assert.throws(() => normalizeOtrAnswer(mobile,'+919876543210'));
