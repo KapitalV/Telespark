@@ -67,13 +67,19 @@ export function parsePortalResult(url, text, expectedRegistration) {
   const location = new URL(url);
   if (location.origin !== 'https://scholarship.up.gov.in') return {kind:'unknown'};
   if (location.pathname.toLowerCase() === '/forgetpasswordprint.aspx') {
-    const registration = /रजिस्ट्रेशन संख्या\s*:\s*(\d+)/u.exec(text)?.[1];
-    const password = /पासवर्ड\s*\(इस नंबर को नोट करें\)\s*:\s*(\S+)/u.exec(text)?.[1];
-    if (registration !== expectedRegistration || !password) return {kind:'unknown'};
+    const normalized = text.normalize('NFKC').replace(/[\u200b-\u200d\ufeff]/g,'');
+    const registrations = [...new Set([...normalized.matchAll(/(?:(?:रजिस्ट्रेशन|पंजीकरण)\s*(?:संख्या|नंबर|क्रमांक)|registration\s*(?:number|no\.?))\s*[:：]\s*(\d+)/giu)].map(m=>m[1]))];
+    const passwords = [...new Set([...normalized.matchAll(/(?:पासवर्ड|\bpassword)\s*(?:\([^\r\n)]{0,80}\))?\s*[:：]\s*(\S+)/giu)].map(m=>m[1]))];
+    if (registrations.some(value=>value !== expectedRegistration)) return {kind:'unknown',reason:'registration-mismatch'};
+    const registration = registrations.length === 1 ? registrations[0] : undefined;
+    // Never normalize the password's characters or guess a value from prose.
+    const rawPasswords = [...new Set([...text.matchAll(/(?:पासवर्ड|\bpassword)\s*(?:\([^\r\n)]{0,80}\))?\s*[:：]\s*(\S+)/giu)].map(m=>m[1]))];
+    const password = rawPasswords.length === 1 ? rawPasswords[0] : undefined;
+    if (registration !== expectedRegistration || passwords.length !== 1 || !password) return {kind:'unknown'};
     return {kind:'success', registration, password};
   }
   const compact = text.replace(/\s+/g, ' ');
-  if (/invalid captcha/i.test(compact)) return {kind:'captcha', message:'The website rejected that CAPTCHA. Please type the new image carefully.'};
+  if (/(?:invalid|incorrect|wrong|expired)\s*captcha|captcha[^.!?]{0,35}(?:invalid|incorrect|expired)|(?:कैप्चा|कैपचा)[^.!?]{0,25}(?:गलत|अमान्य)/i.test(compact)) return {kind:'captcha', message:'The website rejected or expired that CAPTCHA. Please type the new image carefully.'};
   if (/high school board year not matched/i.test(compact)) return {kind:'correction', field:'year', message:'The Class 10 passing year does not match. What year was entered in your original scholarship application?'};
   if (/high school (?:board )?roll (?:number|no).*not matched/i.test(compact)) return {kind:'correction', field:'roll', message:'The Class 10 roll number does not match. Send the correct number.'};
   if (/(?:date of birth|birth date|dob).*not matched/i.test(compact)) return {kind:'correction', field:'dob', message:'The date of birth does not match. Send the date recorded in your original application (DD/MM/YYYY).'};
@@ -97,7 +103,8 @@ export class RecoveryBot {
   async clear(chatId) {
     const state = this.sessions.get(chatId);
     this.sessions.delete(chatId);
-    await state?.portal?.close().catch(() => {});
+    if (state) {state.details={}; state.result=undefined;}
+    void state?.portal?.close().catch(() => {});
   }
 
   async expire() {
@@ -133,7 +140,9 @@ export class RecoveryBot {
     state.lastMessageId = message.message_id;
     state.updated = this.clock();
     if (command === '/result' && state.result) return this.deliver(chatId, state);
-    if (state.phase === 'done') return send('Recovery already succeeded. Use /result to show it again. /start begins a new recovery and may replace that password.');
+    if (state.phase === 'done') return send(state.result?.kind === 'response-image'
+      ? 'The website response was captured; completion is not confirmed. /result shows the screenshot again without another submission. Check it before starting another recovery.'
+      : 'Recovery already succeeded. Use /result to show it again. /start begins a new recovery and may replace that password.');
     if (state.phase === 'unknown') return send('A submission was attempted but its outcome could not be verified. Check the official portal before starting another recovery.');
     if (command === '/refresh' && state.phase === 'captcha') return this.prepare(chatId, state);
     if (command === '/retry' && state.phase === 'prepare-failed') return this.prepare(chatId, state);
@@ -166,10 +175,10 @@ export class RecoveryBot {
     let result;
     try { result = await state.portal.submit(text); }
     catch { result = {kind:'unknown'}; }
-    if (result.kind === 'success') {
+    if (result.kind === 'success' || result.kind === 'response-image') {
       state.result = result;
       state.phase = 'done';
-      await state.portal.close().catch(() => {});
+      void state.portal.close().catch(() => {});
       state.portal = undefined;
       state.details = {};
       return this.deliver(chatId, state);
@@ -184,7 +193,8 @@ export class RecoveryBot {
       return send(result.message);
     }
     state.phase = 'unknown';
-    await state.portal.close().catch(() => {});
+    state.details = {};
+    void state.portal.close().catch(() => {});
     state.portal = undefined;
     return send('The request was submitted, but I could not verify success or a recognized error. Check the official portal before repeating it. I will not submit again automatically.');
   }
@@ -228,6 +238,9 @@ export class RecoveryBot {
 
   async deliver(chatId, state) {
     const {registration, password, slip} = state.result;
+    if (state.result.kind === 'response-image') {
+      return this.telegram.document(chatId,slip,'Recovery-response.png','Official portal page after the recovery attempt. Completion is not confirmed. Read the screenshot for the result or error before repeating recovery. /result re-sends this image without another submission.',{protect_content:true});
+    }
     await this.telegram.send(chatId, `Recovery succeeded.\nRegistration: ${registration}\nLatest password: ${password}\nCase-sensitive. Use this latest result instead of an earlier password.`, {protect_content:true});
     if (slip) await this.telegram.document(chatId, slip, 'Recovery-slip.png', 'Your latest recovery slip.', {protect_content:true});
   }

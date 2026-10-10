@@ -60,6 +60,7 @@ const telegram = new Telegram();
 const recovery = new RecoveryBot({telegram, allowedUserId:owner,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:() => new ScholarshipPortal({
+  onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});

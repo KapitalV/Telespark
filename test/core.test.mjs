@@ -182,3 +182,34 @@ test('CAPTCHA delivery failure retains answers and never submits', async () => {
   assert.equal(f.bot.sessions.get(42).phase,'prepare-failed');
   assert.equal(f.submissions.length,0);
 });
+
+test('Password results tolerate label spacing and English labels but never conflicting records',()=>{
+  const url='https://scholarship.up.gov.in/ForgetPasswordPrint.aspx';
+  assert.equal(parsePortalResult(url,'रजिस्ट्रेशन\nसंख्या ： 000123456789\nपासवर्ड : AbC@123','000123456789').password,'AbC@123');
+  assert.equal(parsePortalResult(url,'Registration Number: 000123456789\nPassword (note this number): AbC@123','000123456789').password,'AbC@123');
+  assert.equal(parsePortalResult(url,'Registration Number: 999999999999\nPassword: AbC@123','000123456789').reason,'registration-mismatch');
+  assert.equal(parsePortalResult(url,'Registration Number: 000123456789\nPassword: One123\nPassword: Two123','000123456789').kind,'unknown');
+  assert.equal(parsePortalResult('https://scholarship.up.gov.in/ForgetPwd.aspx','Captcha is incorrect','').kind,'captcha');
+});
+
+test('Unrecognized official response is delivered as a protected screenshot with no success claim or repeat',async()=>{
+  const slip=Buffer.from('official response');
+  const f=fixture([{kind:'response-image',slip}]);const documents=[];
+  f.telegram.document=async (...args)=>{documents.push(args);return {message_id:300};};
+  await f.fill();await f.say('AbC12');
+  assert.equal(f.bot.sessions.get(42).phase,'done');
+  assert.equal(documents[0][1],slip);assert.equal(documents[0][4].protect_content,true);
+  assert.match(documents[0][3],/Completion is not confirmed/);
+  await f.say('/result');await f.say('AbC12');
+  assert.equal(f.submissions.length,1);assert.equal(documents.length,2);
+  assert.doesNotMatch(f.messages.at(-1),/succeeded/);
+  const state=f.bot.sessions.get(42);await f.say('/cancel');assert.equal(state.result,undefined);
+});
+
+test('Failed response-image delivery is recoverable using /result without resetting the password',async()=>{
+  const f=fixture([{kind:'response-image',slip:Buffer.from('image')}]);await f.fill();
+  f.telegram.document=async()=>{throw Error('Delivery failed');};
+  await assert.rejects(f.say('AbC12'));
+  let delivered=false;f.telegram.document=async()=>{delivered=true;};
+  await f.say('/result');assert.ok(delivered);assert.equal(f.submissions.length,1);
+});

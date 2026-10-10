@@ -46,10 +46,14 @@ test('Verified recovered password survives failure to capture the optional slip'
     locator:selector => ({
       fill:async value => {inputs.push([selector,value]);},
       click:async () => {clicks++;},
+      evaluate:async () => ({url:'https://scholarship.up.gov.in/ForgetPwd.aspx',target:''}),
       innerText:async () => 'आपका रजिस्ट्रेशन संख्या: 000123456789\nपासवर्ड (इस नंबर को नोट करें): Abc123',
     }),
     waitForNavigation:async () => {},
-    url:() => 'https://scholarship.up.gov.in/ForgetPasswordPrint.aspx',
+    waitForFunction:async () => {},
+    waitForLoadState:async () => {},
+    on:() => {},off:() => {},
+    url:() => `https://scholarship.up.gov.in/${clicks?'ForgetPasswordPrint':'ForgetPwd'}.aspx`,
     screenshot:async () => {throw new Error('Screenshot failed');},
   };
   const result = await portal.submit('AbC12');
@@ -57,4 +61,24 @@ test('Verified recovered password survives failure to capture the optional slip'
   assert.equal(result.password,'Abc123');
   assert.equal(clicks,1);
   assert.deepEqual(inputs,[['#ContentPlaceHolder1_txtCaptcha','AbC12']]);
+});
+
+test('A late result redirect during screenshot capture is reclassified before closing',async()=>{
+  const portal=new ScholarshipPortal();portal.details={registration:'000123456789'};
+  let captures=0;
+  portal.page={
+    url:()=>`https://scholarship.up.gov.in/${captures?'ForgetPasswordPrint':'ForgetPwd'}.aspx`,
+    screenshot:async()=>{captures++;return Buffer.from(`image ${captures}`);},
+    locator:()=>({innerText:async()=> 'Registration Number: 000123456789\nPassword: Example1@'}),
+  };
+  const result=await portal.captureResult({kind:'unknown'});
+  assert.equal(result.kind,'success');assert.equal(result.password,'Example1@');
+  assert.equal(captures,2,'Capture the verified final page after the URL changed');
+});
+
+test('Late mismatched result is discarded, including the already captured image',async()=>{
+  const portal=new ScholarshipPortal();portal.details={registration:'000123456789'};
+  portal.page={url:()=> 'https://scholarship.up.gov.in/ForgetPasswordPrint.aspx',screenshot:async()=>Buffer.from('image'),locator:()=>({innerText:async()=> 'Registration Number: 999123456789\nPassword: Example1@'})};
+  const result=await portal.captureResult({kind:'unknown'});
+  assert.equal(result.kind,'unknown');assert.equal(result.reason,'registration-mismatch');assert.equal(result.slip,undefined);
 });

@@ -70,7 +70,7 @@ Send `/start` to your bot. It asks, in order:
 
 The bot fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits the recovery request. There is no additional confirmation prompt in this user-operated program. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
 
-After success, the bot sends your latest password and a PNG recovery slip. Repeated recovery may generate a different password. Use `/result` to resend an already completed result without submitting again.
+After success, the bot sends your latest password and a PNG recovery slip. If the official page is readable but its outcome is unrecognized, the bot sends a protected screenshot labelled as unconfirmed, so you can read the website's response. A result labelled with a different registration number is not delivered. Repeated recovery may generate a different password. Use `/result` to resend a saved result or response screenshot without submitting again.
 
 ## Commands
 
@@ -89,7 +89,7 @@ After success, the bot sends your latest password and a PNG recovery slip. Repea
 
 For local polling mode, keep this PowerShell process and your PC running with internet access while using the bot. Only one instance should run for a token. Polling needs no incoming ports or public URL. A Render Free Web Service uses webhook mode instead; see the deployment guide. Do not run local polling and the cloud webhook for the same token at the same time.
 
-An invalid CAPTCHA produces a new image while retaining the six details. A recognized mismatch requests only the affected field, such as Class 10 passing year. Unknown results and navigation timeouts stop submission attempts because the password might already have changed. Check the official site before intentionally starting another recovery.
+An invalid CAPTCHA produces a new image while retaining the six details. A recognized mismatch requests only the affected field, such as Class 10 passing year. The response reader handles page navigation, in-place responses and validation alerts. After a navigation deadline it still checks the currently rendered official page. Unknown results stop further submission attempts because the password might already have changed. Check the response screenshot or official site before intentionally starting another recovery. Response diagnostics contain only a result category, an allowlisted page category, HTTP status and whether the click reported an error; they never include answers or passwords.
 
 CAPTCHA replies older than five minutes are not submitted. Idle sessions and completed results are removed from memory after twenty minutes. Restarting clears memory and skips old queued messages to avoid replaying CAPTCHA replies. Tokens, applicant details, passwords, and slips are not written to program logs or local storage; they do travel through Telegram and remain subject to Telegram's chat storage. Protected result messages reduce forwarding and saving but are not end-to-end encryption.
 
