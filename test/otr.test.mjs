@@ -116,7 +116,9 @@ test('Wrong CAPTCHA and invalid/expired OTP prompt again without automatic resub
   for (const answer of ['9876543210','AbC12']) await f.say(answer);
   assert.equal(f.submits.length,1);
   assert.ok(f.sent.some(m => /rejected or expired that CAPTCHA/.test(m.text)));
-  for (const answer of ['9876543210','XyZ45','001234']) await f.say(answer);
+  assert.equal(f.bot.sessions.get(42).values.mobile,'9876543210');
+  assert.equal(f.bot.sessions.get(42).step.fields[f.bot.sessions.get(42).index].type,'captcha');
+  for (const answer of ['XyZ45','001234']) await f.say(answer);
   assert.equal(f.submits.length,3);
   assert.ok(f.sent.some(m => /rejected or expired that OTP/.test(m.text)));
   assert.deepEqual(f.bot.sessions.get(42).values,{});
@@ -145,6 +147,7 @@ test('OTP resend honors a local cooldown and unavailable portal resend never sub
   f.advance(61_000); await f.say('/resend');
   assert.equal(f.bot.sessions.get(42).phase,'questions');
   assert.equal(f.submits.length,1);
+  assert.ok(f.sent.some(message => /No new OTP was requested/.test(message.text)));
 });
 
 test('Preparation timeout supports retry and never exposes raw error details', async () => {
@@ -203,6 +206,7 @@ test('Idle expiry closes sessions and removes personal values without new messag
   assert.equal(f.bot.sessions.size,0);
   assert.equal(f.router.sessions.size,0);
   assert.deepEqual(state.values,{});
+  assert.equal(state.savedMobile,undefined);
 });
 
 test('Router serializes concurrent duplicate updates, including /start', async () => {

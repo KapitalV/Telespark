@@ -8,6 +8,7 @@ import {probePortal, probeConnection} from './probe.mjs';
 import {BotRouter} from './router.mjs';
 import {OtrBot} from './otr-core.mjs';
 import {OtrPortal} from './otr-portal.mjs';
+import {OtrRecoveryPortal} from './otr-recovery.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -60,7 +61,7 @@ const recovery = new RecoveryBot({telegram, allowedUserId:owner,
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
-const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new OtrPortal({
+const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
   mode,
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),

@@ -1,6 +1,14 @@
 import {chromium} from 'playwright';
 import {classifyOtrPage, OTR_ORIGIN, OTR_PATHS} from './otr-schema.mjs';
 
+export function classifyOtrDialog(text) {
+  const invalid = /invalid|incorrect|wrong|expired|गलत|अमान्य|समाप्त/i.test(text);
+  if (invalid && /captcha|कैप्चा/i.test(text)) return 'captcha';
+  if (invalid && /otp|ओ[०.\s]*टी[०.\s]*पी/i.test(text)) return 'otp';
+  if (/otp|ओ[०.\s]*टी[०.\s]*पी/i.test(text) && /sent|भेज|भेजा/i.test(text)) return 'notice';
+  return 'unknown';
+}
+
 // This function runs in the page. It reads visible structure, not hidden
 // ASP.NET state, input values, Aadhaar numbers, or cookies.
 export function readOtrDocument() {
@@ -39,7 +47,19 @@ export function readOtrDocument() {
     if (sibling && visible(sibling) && /^[A-Za-z0-9-]{8,30}$/.test(sibling.innerText.trim())) candidates.push(sibling.innerText.trim());
   }
   const unique = [...new Set(candidates)];
-  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined};
+  // Recovery pages can render the labelled number inline or as a read-only
+  // textbox. Read only explicit output labels, not numbers from arbitrary prose.
+  const recoveryResults = [...unique];
+  const inlineOtr = /^(?:(?:your|आपका|आपकी)\s+)?(?:OTR|ओ[०.\s]*टी[०.\s]*आर[०.]*)(?:\s*\(OTR\))?\s*(?:number|no\.?|संख्या|नंबर)\s*[:：]\s*([A-Za-z0-9-]{8,30})\s*$/i;
+  for (const e of document.querySelectorAll('td,dd,p,span,label,strong,b,output')) {
+    if (!visible(e)) continue;
+    const match = inlineOtr.exec(e.innerText.trim());
+    if (match) recoveryResults.push(match[1]);
+  }
+  for (const e of document.querySelectorAll('input[readonly],input:disabled')) {
+    if (visible(e) && otrLabel.test(label(e).trim()) && /^[A-Za-z0-9-]{8,30}$/.test(e.value.trim())) recoveryResults.push(e.value.trim());
+  }
+  return {url:location.href, fields, buttons, externalFrame, error, result:unique.length === 1 ? unique[0] : undefined,recoveryResults:[...new Set(recoveryResults)]};
 }
 
 export class OtrPortal {
@@ -69,7 +89,8 @@ export class OtrPortal {
     this.page.setDefaultNavigationTimeout(30_000);
     this.page.on('dialog', async dialog => {
       const text = dialog.message();
-      this.dialogError = /captcha/i.test(text) ? 'captcha' : /otp/i.test(text) ? 'otp' : 'unknown';
+      const kind = classifyOtrDialog(text);
+      this.dialogError = kind === 'notice' ? undefined : kind;
       await dialog.dismiss().catch(() => {});
     });
     const response = await this.page.goto(`${OTR_ORIGIN}${OTR_PATHS[this.mode]}`, {waitUntil:'domcontentloaded'});
@@ -82,6 +103,7 @@ export class OtrPortal {
   }
 
   async snapshot() { return this.page.evaluate(readOtrDocument); }
+  classify(snapshot) { return classifyOtrPage(snapshot, this.mode); }
 
   async read() {
     if (this.externalBlocked) return {kind:'unsupported',reason:'external-verification'};
@@ -95,7 +117,7 @@ export class OtrPortal {
         step = {kind:'form',stage:'consent',fields:[{...checkbox,key:'chk',type:'consent'}],action:{kind:'consent',label:'Accept OTR declaration'},fingerprint:checkbox.label};
       }
     }
-    step ??= classifyOtrPage(snapshot, this.mode);
+    step ??= this.classify(snapshot);
     if (this.dialogError) {
       if (step.kind === 'form' && ['captcha','otp'].includes(this.dialogError)) step.error = this.dialogError;
       else step = {kind:'unsupported',reason:'dialog'};
@@ -152,21 +174,23 @@ export class OtrPortal {
       else await fill();
     }
     // Recheck shape after change/postback events and before the consequential click.
-    const beforeClick = classifyOtrPage(await this.snapshot(), this.mode);
+    const beforeClick = this.classify(await this.snapshot());
     if (beforeClick.kind !== 'form' || beforeClick.fingerprint !== fingerprint) return {kind:'unsupported',reason:'changed-form'};
     for (const field of current.fields) {
       const actual = field.type === 'consent' ? await this.field(field.id).isChecked() : await this.field(field.id).inputValue();
       if (actual !== values[field.key]) return {kind:'unsupported',reason:'changed-values'};
     }
-    await Promise.all([
-      this.page.waitForNavigation({waitUntil:'domcontentloaded'}),
-      this.field(current.action.id).click(),
-    ]);
+    this.beforeSubmit?.(current);
+    await this.performSubmit(current);
     const result = await this.read();
     // An unchanged form without a recognized validation error is ambiguous,
     // not permission to request a second OTP or repeat final registration.
     if (result.kind === 'form' && result.fingerprint === fingerprint && !result.error) return {kind:'unknown'};
     return result;
+  }
+
+  async performSubmit(step) {
+    await Promise.all([this.page.waitForNavigation({waitUntil:'domcontentloaded'}),this.field(step.action.id).click()]);
   }
 
   async refresh(fingerprint) {

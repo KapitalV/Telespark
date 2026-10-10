@@ -117,6 +117,9 @@ Browser automation documentation: https://playwright.dev/docs/library
 
 # Experimental OTR modules
 
+OTR recovery now has a dedicated adapter; see [OTR_RECOVERY.md](OTR_RECOVERY.md)
+for its rebuilt flow, the 60-test result, and the outstanding live-site check.
+
 `/start` now offers **1. Password recovery** and **2. OTR**. Password recovery
 retains its existing six-question flow. OTR is off unless `ENABLE_OTR=true`.
 Its submenu offers **Recover OTR**, **Register OTR**, and **Back**.

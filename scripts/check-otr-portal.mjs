@@ -1,9 +1,10 @@
 import {OtrPortal} from '../otr-portal.mjs';
+import {OtrRecoveryPortal} from '../otr-recovery.mjs';
 
 // Public pages only. No Telegram token, applicant data, CAPTCHA solving,
 // consent acceptance, OTP request, or registration submission.
 for (const mode of ['recover','register']) {
-  const portal = new OtrPortal({mode, channel:process.env.BROWSER_CHANNEL || undefined});
+  const portal = new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({mode, channel:process.env.BROWSER_CHANNEL || undefined});
   try {
     const step = await portal.open();
     console.log(JSON.stringify({mode,kind:step.kind,stage:step.stage,fields:step.fields?.map(f => ({id:f.id,type:f.type,label:f.label})),action:step.action?.label,imageBytes:step.image?.length ?? 0,submitted:false}));

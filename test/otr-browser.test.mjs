@@ -4,6 +4,8 @@ import {chromium} from 'playwright';
 import {OtrPortal} from '../otr-portal.mjs';
 import {OTR_ORIGIN} from '../otr-schema.mjs';
 import {OtrBot} from '../otr-core.mjs';
+import {OtrRecoveryPortal} from '../otr-recovery.mjs';
+import {BotRouter} from '../router.mjs';
 
 const input = (id,label,type = 'text') => `<label for="${id}">${label}</label><input id="${id}" name="${id}" type="${type}">`;
 const button = (label,id = 'submit') => `<input type="submit" id="${id}" value="${label}">`;
@@ -19,7 +21,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
   const fixture = async (mode, respond) => {
     let context;
     const posts = [];
-    const portal = new OtrPortal({mode,launch:async () => ({
+    const portal = new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({mode,launch:async () => ({
       newContext:async options => {
         context = await browser.newContext(options);
         await context.route('**/*',async route => {
@@ -189,5 +191,39 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     assert.equal(f.posts[5].get('father'),'Example Father');
     assert.equal(bot.sessions.get(42).phase,'done');
     assert.match(sent.at(-1),/00012345678901/);
+  });
+
+  await t.test('Recovery menu -> mobile -> refresh -> Hindi masked OTP -> result across AJAX updates',async () => {
+    const ajax = html => html.replace('<form method="post">',`<form method="post" onsubmit="event.preventDefault();fetch(location.href,{method:'POST',body:new URLSearchParams(new FormData(this))}).then(r=>r.text()).then(html=>document.body.innerHTML=html)">`);
+    for (const resultBody of [
+      '<p>आपका ओ०टी०आर० संख्या: 00012345678901</p>',
+      '<label for="result">OTR Number:</label><input id="result" readonly value="00012345678901">',
+    ]) {
+      const otpForm = ajax(page(input('otp','ओ०टी०पी०','password') + button('ओ०टी०पी० सत्यापित करें')));
+      const f = await fixture('recover',(_req,_url,posts) => posts.length === 0 ? ajax(initial) : posts.length === 1 ? otpForm : page(resultBody));
+      let outgoing = 100, incoming = 1;
+      const sent = [];
+      const telegram = {
+        send:async (_id,text,options) => {sent.push({text,options}); return {message_id:outgoing++};},
+        photo:async () => ({message_id:outgoing++}),
+      };
+      const otr = new OtrBot({telegram,allowedUserId:'42',portalFactory:() => f.portal});
+      const router = new BotRouter({telegram,allowedUserId:'42',enableOtr:true,otr,recovery:{clear:async()=>{},expire:async()=>{}}});
+      const say = text => router.handle({from:{id:42},chat:{id:42,type:'private'},message_id:incoming++,text});
+      for (const text of ['/start','2','1','9876543210','/refresh']) await say(text);
+      assert.equal(f.posts.length,0);
+      assert.equal(otr.sessions.get(42).step.fields[otr.sessions.get(42).index].type,'captcha');
+      await say('AbC12');
+      assert.equal(otr.sessions.get(42).step.stage,'otp');
+      await say('001234');
+      assert.equal(otr.sessions.get(42).phase,'done');
+      assert.equal(otr.sessions.get(42).savedMobile,undefined);
+      await say('/result');
+      assert.equal(f.posts.length,2);
+      assert.equal(f.posts[0].get('ContentPlaceHolder1_txt_mobile'),'9876543210');
+      assert.equal(f.posts[1].get('otp'),'001234');
+      assert.match(sent.at(-1).text,/00012345678901/);
+      assert.equal(sent.at(-1).options.protect_content,true);
+    }
   });
 });

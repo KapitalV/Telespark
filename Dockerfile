@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # Copy only program files: never bake .env or recovery results into the image.
-COPY --chown=pwuser:pwuser bot.mjs core.mjs portal.mjs webhook.mjs probe.mjs router.mjs otr-core.mjs otr-portal.mjs otr-schema.mjs ./
+COPY --chown=pwuser:pwuser bot.mjs core.mjs portal.mjs webhook.mjs probe.mjs router.mjs otr-core.mjs otr-portal.mjs otr-schema.mjs otr-recovery.mjs ./
 
 ENV NODE_ENV=production
 ENV HEADLESS=true

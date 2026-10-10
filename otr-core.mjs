@@ -19,11 +19,15 @@ export class OtrBot {
     this.sessions.delete(id);
     if (state) {
       state.values = {};
+      state.savedMobile = undefined;
       state.result = state.step = undefined;
       const portal = state.portal;
       state.portal = undefined;
       // A hung browser close must not hold cancellation or idle cleanup hostage.
-      void portal?.close().catch(() => {});
+      let timer;
+      try {
+        await Promise.race([portal?.close().catch(() => {}),new Promise(resolve => {timer = setTimeout(resolve,2000);})]);
+      } finally { clearTimeout(timer); }
     }
   }
 
@@ -52,6 +56,7 @@ export class OtrBot {
       state.values = {};
       state.step = undefined;
       state.phase = submission ? 'unknown' : 'load-failed';
+      if (submission) state.savedMobile = undefined;
       const portal = state.portal;
       state.portal = undefined;
       void portal?.close().catch(() => {});
@@ -80,6 +85,7 @@ export class OtrBot {
   async stop(id, state, phase, message) {
     state.phase = phase;
     state.values = {};
+    state.savedMobile = undefined;
     state.step = undefined;
     const portal = state.portal;
     state.portal = undefined;
@@ -88,11 +94,17 @@ export class OtrBot {
   }
 
   async apply(id, state, step) {
+    if (step?.kind === 'resend-unavailable') {
+      state.phase = 'questions';
+      await this.telegram.send(id, 'The website does not currently offer OTP resend. Wait before trying /resend again, or enter the OTP you already received. No new OTP was requested.');
+      return this.prompt(id, state);
+    }
     if (step?.kind === 'unknown') return this.stop(id, state, 'unknown', 'The request outcome is uncertain. Check the official website or SMS before starting again. I will not repeat the submission.');
     if (step?.kind === 'success') {
       state.result = step.otr;
       state.phase = 'done';
       state.values = {};
+      state.savedMobile = undefined;
       state.step = undefined;
       const portal = state.portal;
       state.portal = undefined;
@@ -105,6 +117,11 @@ export class OtrBot {
     state.phase = 'questions';
     state.index = 0;
     state.values = {};
+    if (state.mode === 'recover' && state.savedMobile) {
+      for (const field of step.fields) if (field.type === 'mobile') state.values[field.key] = state.savedMobile;
+    }
+    while (state.index < step.fields.length && step.fields[state.index].key in state.values) state.index++;
+    if (state.index >= step.fields.length) return this.stop(id,state,'unsupported','The portal has no CAPTCHA or OTP question to continue safely. Use /menu.');
     if (step.error) await this.telegram.send(id, ERRORS[step.error] ?? 'The website did not accept the details. Check them before continuing.');
     const actionText = {
       'send-otp':'After you answer these fields, I will request an SMS OTP.',
@@ -165,11 +182,7 @@ export class OtrBot {
       if (state.step.stage !== 'otp') return this.telegram.send(id, 'OTP resend is available only during OTP verification.');
       if (this.clock() - (state.otpRequestedAt ?? 0) < 60_000) return this.telegram.send(id, 'Wait at least 60 seconds after the last OTP request. The website may require longer.');
       state.otpRequestedAt = this.clock();
-      return this.operation(id, state, async () => {
-        const step = await state.portal.resend();
-        if (step.kind === 'resend-unavailable') return {...state.step,error:'otp'};
-        return step;
-      }, {submission:true});
+      return this.operation(id, state, () => state.portal.resend(), {submission:true});
     }
     if (text.startsWith('/')) return this.telegram.send(id, 'Use /menu, /cancel, /refresh, /resend, or /result where available.');
     if ((message.reply_to_message?.message_id && message.reply_to_message.message_id !== state.promptId) || (message.date && (message.date + 1) * 1000 < state.promptAt)) return this.telegram.send(id, 'That reply belongs to an older step. Answer the latest prompt.');
@@ -184,7 +197,9 @@ export class OtrBot {
     }
     try { state.values[field.key] = normalizeOtrAnswer(field, text); }
     catch (error) { return this.telegram.send(id, error.message); }
+    if (state.mode === 'recover' && field.type === 'mobile') state.savedMobile = state.values[field.key];
     state.index++;
+    while (state.index < state.step.fields.length && state.step.fields[state.index].key in state.values) state.index++;
     if (state.index < state.step.fields.length) return this.prompt(id, state);
     if (state.step.action.kind === 'register') {
       state.phase = 'confirm';

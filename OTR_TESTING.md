@@ -1,5 +1,10 @@
 # OTR verification and manual testing
 
+For the subsequent recovery-only rebuild, see [OTR_RECOVERY.md](OTR_RECOVERY.md).
+That requested rebuild was tested again: 60 automated tests passed; the live
+portal still returned HTTP 503. The older 54-test record below describes the
+initial implementation.
+
 The owner subsequently requested a local merge and explicitly requested no
 further tests. The earlier pre-merge manual-test gate is waived for this merge.
 The results below were recorded before that instruction. Live verification is
@@ -101,6 +106,8 @@ that redirect does not count as a live verification of the protected form.
 - `otr-portal.mjs` / `otr-schema.mjs`: isolated browser context, live form
   structure, explicit recognized action types, ASP.NET postback waits, and
   conservative result classification.
+- `otr-recovery.mjs`: dedicated recovery classification, Hindi OTP controls,
+  verified-session result handling, and full/partial postback submission waits.
 - The original `core.mjs` and `portal.mjs` password recovery logic is unchanged.
 - Later-stage fixture names/fields are synthetic adapter contracts. A fixture
   passing is not evidence that a particular e-KYC or result page matches today.
