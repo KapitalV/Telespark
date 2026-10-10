@@ -9,6 +9,8 @@ import {BotRouter} from './router.mjs';
 import {OtrBot} from './otr-core.mjs';
 import {OtrPortal} from './otr-portal.mjs';
 import {OtrRecoveryPortal} from './otr-recovery.mjs';
+import {RegistrationBot} from './registration-core.mjs';
+import {RegistrationPortal} from './registration-portal.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -67,7 +69,11 @@ const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
-const bot = new BotRouter({telegram, recovery, otr, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
+const registration = new RegistrationBot({telegram,allowedUserId:owner,portalFactory:()=>new RegistrationPortal({
+  headless:process.env.HEADLESS !== 'false',
+  channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
+})});
+const bot = new BotRouter({telegram, recovery, otr, registration, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
 // Expire sensitive in-memory sessions even when no webhook messages arrive.
 const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
 cleanupTimer.unref();

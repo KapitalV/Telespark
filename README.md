@@ -93,7 +93,7 @@ An invalid CAPTCHA produces a new image while retaining the six details. A recog
 
 CAPTCHA replies older than five minutes are not submitted. Idle sessions and completed results are removed from memory after twenty minutes. Restarting clears memory and skips old queued messages to avoid replaying CAPTCHA replies. Tokens, applicant details, passwords, and slips are not written to program logs or local storage; they do travel through Telegram and remain subject to Telegram's chat storage. Protected result messages reduce forwarding and saving but are not end-to-end encryption.
 
-The bot is for your authorized account recovery. The website can change its fields, sessions, or verification flow; update `portal.mjs` if its layout changes. This version handles postmatric recovery; it does not decide scholarship eligibility or submit scholarship applications.
+The bot supports authorized postmatric recovery and the fresh scholarship registration form described below. The website can change its fields, sessions, or verification flow. The bot does not decide scholarship eligibility.
 
 ## Validation
 
@@ -115,32 +115,33 @@ API documentation: https://core.telegram.org/bots/api#getupdates
 
 Browser automation documentation: https://playwright.dev/docs/library
 
-# Experimental OTR modules
+# OTR recovery and scholarship registration
 
 OTR recovery now has a dedicated adapter; see [OTR_RECOVERY.md](OTR_RECOVERY.md)
-for its rebuilt flow, the 60-test result, and the outstanding live-site check.
+for its rebuilt flow. A live recovered OTR screenshot was verified in the
+owner's Telegram chat on 2026-10-10.
 
 `/start` now offers **1. Password recovery** and **2. OTR**. Password recovery
 retains its existing six-question flow. OTR is off unless `ENABLE_OTR=true`.
-Its submenu offers **Recover OTR**, **Register OTR**, and **Back**.
+Its submenu offers **Recover OTR**, **Scholarship registration using OTR**, and **Back**.
 
 The OTR handler asks for fields from the current official form, shows CAPTCHA
 images for the user to answer, accepts SMS OTPs, and preserves the browser
-session between steps. Registration requires explicit agreement to the current
-portal declaration and a separate `CONFIRM` before a recognized final submission.
+session between steps. Scholarship registration starts from `RegistrationNew.aspx`,
+uses an existing OTR, asks the fields in the supplied Fresh Postmatric form,
+and requires a final review and `CONFIRM` before submission. It returns the
+official response screenshot. See [SCHOLARSHIP_REGISTRATION.md](SCHOLARSHIP_REGISTRATION.md)
+for supported courses, searchable institution lists, and verification limits.
 `/menu` and `/cancel` clear the current session. `/retry` retries a failed page
 load or re-delivers the current prompt; `/refresh` refreshes a CAPTCHA;
 `/resend` uses an enabled portal resend control after a minimum 60-second local
 cooldown; `/result` re-delivers a verified result without a new submission.
 
-**Status:** experimental, approved for local merge by the owner before manual
-testing; not deployed. The public recovery form
-and registration declaration have been checked live without OTP requests.
-OTP-protected recovery results, Aadhaar e-KYC, and final registration have only
-synthetic contract coverage, not live end-to-end verification. Recognized fields
-and actions can continue in Telegram; unexpected controls, external identity
-provider steps, and ambiguous outcomes stop safely. Do not describe this as a
-fully verified registration service until the manual Telegram test passes.
+**Registration verification:** the department routes and OTR-unlocked form were
+inspected live; the final registration response is covered by intercepted browser
+tests and awaits a real applicant submission. No live registration was created
+during development. The older create-new-OTR adapter remains separate from the
+second menu action. Unknown fields or external verification stop the session.
 
 The bot remains owner-only and private-chat-only. It stores OTR session values
 in memory, clears OTP inputs after each attempted submission, closes idle

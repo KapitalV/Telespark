@@ -126,7 +126,7 @@ export class OtrPortal {
       this.dialogError = kind === 'notice' ? undefined : kind;
       await dialog.dismiss().catch(() => {});
     });
-    const response = await this.page.goto(`${OTR_ORIGIN}${OTR_PATHS[this.mode]}`, {waitUntil:'domcontentloaded'});
+    const response = await this.page.goto(`${OTR_ORIGIN}${this.startPath ?? OTR_PATHS[this.mode]}`, {waitUntil:'domcontentloaded'});
     if (response?.status() >= 400) {
       const error = new Error('OTR website unavailable.');
       error.code = `HTTP_${response.status()}`;

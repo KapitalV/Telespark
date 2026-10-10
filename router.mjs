@@ -1,7 +1,7 @@
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, allowedUserId:String(allowedUserId), enableOtr, clock});
+  constructor({telegram, recovery, otr, registration, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, allowedUserId:String(allowedUserId), enableOtr, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
@@ -19,11 +19,11 @@ export class BotRouter {
 
   async clear(id) {
     this.sessions.delete(id);
-    await Promise.all([this.recovery.clear(id), this.otr.clear(id)]);
+    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id)]);
   }
 
   async expire() {
-    await Promise.all([this.recovery.expire(), this.otr.expire()]);
+    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire()]);
     for (const [id, state] of this.sessions) {
       if (this.clock() - state.updated > 20 * 60_000) await this.clear(id);
     }
@@ -32,8 +32,8 @@ export class BotRouter {
   async menu(id, submenu = false) {
     await this.clear(id);
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
-    const rows = submenu ? [['1. Recover OTR'], ['2. Register OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR']];
-    return this.telegram.send(id, submenu ? 'OTR — choose an option. Registration is experimental and awaits your manual test.' : 'UP Scholarship — choose an option.', {
+    const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR']];
+    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.', {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
   }
@@ -76,12 +76,18 @@ export class BotRouter {
     if (state.module === 'otr-menu') {
       if (/^back$/i.test(text)) return this.menu(id);
       if (/^[12](?:\.|$)/.test(text)) {
+        if (text.startsWith('2')) {
+          if (!this.registration) return this.telegram.send(id,'Scholarship registration is unavailable in this bot build. Use Back.');
+          state.module = 'registration';
+          return this.registration.start(id);
+        }
         state.module = 'otr';
-        return this.otr.start(id, text.startsWith('1') ? 'recover' : 'register');
+        return this.otr.start(id, 'recover');
       }
-      return this.telegram.send(id, 'Choose 1 to Recover OTR, 2 to Register OTR, or Back.');
+      return this.telegram.send(id, 'Choose 1 to Recover OTR, 2 for Scholarship registration using OTR, or Back.');
     }
     if (state.module === 'password') return this.recovery.handle(message);
+    if (state.module === 'registration') return this.registration.handle(message);
     return this.otr.handle(message);
   }
 }

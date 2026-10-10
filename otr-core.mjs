@@ -146,7 +146,7 @@ export class OtrBot {
       register:'I will ask you to confirm before submitting final OTR registration.',
       consent:'Read the official declaration below before agreeing.',
     }[step.action.kind];
-    await this.telegram.send(id, actionText);
+    if (actionText && !this.quietActions) await this.telegram.send(id, actionText);
     return this.prompt(id, state);
   }
 
@@ -214,7 +214,7 @@ export class OtrBot {
       await this.telegram.send(id, 'That CAPTCHA is old. Loading a fresh image without submitting.');
       return this.operation(id, state, () => state.portal.refresh(state.step.fingerprint));
     }
-    try { state.values[field.key] = normalizeOtrAnswer(field, text); }
+    try { state.values[field.key] = this.normalizeAnswer(field, text, state); }
     catch (error) { return this.telegram.send(id, error.message); }
     if (state.mode === 'recover' && field.type === 'mobile') state.savedMobile = state.values[field.key];
     state.index++;
@@ -226,6 +226,8 @@ export class OtrBot {
     }
     return this.submit(id, state);
   }
+
+  normalizeAnswer(field, text) { return normalizeOtrAnswer(field, text); }
 
   async confirmRegistration(id, state) {
     const summary = state.step.fields.filter(f => !['captcha','otp','consent'].includes(f.type)).map(f => {
