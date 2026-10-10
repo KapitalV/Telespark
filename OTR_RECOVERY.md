@@ -11,7 +11,8 @@ Registration continues to use its separate existing adapter.
 3. Request an OTP once and wait for the website's OTP form. Recognize both Hindi
    and English verification controls, including a masked OTP input.
 4. Collect the OTP and the second CAPTCHA shown by the portal, then submit once
-   and return a clearly labelled OTR result.
+   and send a protected screenshot of the official result to Telegram. Include
+   the OTR in the caption when it can also be read reliably as text.
    Accept a result only after this same browser session submitted verification.
 5. `/result` re-delivers the result without another website request. Cancellation,
    expiry, completion, and uncertain outcomes clear the saved mobile number.
@@ -56,12 +57,17 @@ final labelled sentence after the preceding notice. The live identifier shape
 was `XX##-##########`, already supported by the identifier validator. The browser
 regression now includes a preceding notice and that identifier shape.
 
-If the same verified, explicitly labelled final panel has exactly one bounded
-numeric identifier in an unfamiliar format, the bot returns a protected crop
-of that panel instead of guessing its number or throwing away the result.
-This fallback rejects active input forms, error states, external pages, and
-ambiguous/conflicting results. The image remains in memory for `/result` and is
-cleared on cancellation or expiry; no image or applicant value is logged.
+Screenshot delivery is the default for recovery results, matching the user's
+requested password-recovery behavior. The known final panel is cropped when
+present; other recognized result layouts use a page screenshot. Image delivery
+does not depend on parsing the H3 sentence: after verification, a visible final
+panel with one bounded numeric H1 and no remaining inputs/error is enough to
+show the official response. If text extraction is uncertain, the caption says
+"Official website response" instead of asserting a parsed OTR. Active forms,
+external pages, errors, and ambiguous/conflicting results remain excluded.
+If screenshot capture fails but the text result is verified, that text is kept.
+The image remains in memory for `/result` and is cleared on cancellation or
+expiry; no image or applicant value is logged.
 
 Diagnostics retain control IDs, operational keywords, and digit-group lengths;
 they exclude raw page text, actual numbers, answers, cookies, and URL queries.

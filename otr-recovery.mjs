@@ -36,6 +36,13 @@ export function classifyRecovery(snapshot, {verificationSubmitted = false} = {})
   if (verificationSubmitted && candidates.length === 1 && !snapshot.error && snapshot.fields.length === 0) {
     return {kind:'success',otr:candidates[0]};
   }
+  // A screenshot does not require parsing the website's heading text. The
+  // observed final result panel is enough to show the user the portal response,
+  // after this session submitted verification and no input/error remains.
+  const panel = snapshot.recoveryPanel;
+  if (verificationSubmitted && url.pathname.toLowerCase() === '/forgetotr.aspx' && !snapshot.error && !snapshot.fields.length && !candidates.length && panel?.values.length === 1 && panel.values[0].length <= 80 && /\d{8}/.test(panel.values[0])) {
+    return {kind:'result-image'};
+  }
   if (snapshot.fields.some(field => !['mobile','captcha','otp'].includes(fieldType(field)))) return {kind:'unsupported',reason:'fields'};
   const step = classifyOtrPage({...snapshot,result:undefined},'recover');
   if (step.kind !== 'form') return step;
@@ -49,18 +56,20 @@ export class OtrRecoveryPortal extends OtrPortal {
   classify(snapshot) { return classifyRecovery(snapshot,{verificationSubmitted:this.verificationSubmitted}); }
   async read() {
     const step = await super.read();
-    if (step.kind !== 'unsupported' || step.reason !== 'fields' || !this.verificationSubmitted || this.externalBlocked) return step;
-    const snapshot = await this.snapshot();
-    const panel = snapshot.recoveryPanel;
-    // Preserve a readable official result if its identifier uses an unfamiliar
-    // format. This is a crop of the verified, explicitly labelled final panel,
-    // not a screenshot of an unknown verification form or a guessed identifier.
-    if (snapshot.url === `${OTR_ORIGIN}/ForgetOTR.aspx` && !snapshot.externalFrame && !snapshot.error && !snapshot.fields.length && !snapshot.result && !snapshot.recoveryResults?.length && panel?.labelled && panel.values.length === 1 && panel.values[0].length <= 80 && /\d{8}/.test(panel.values[0])) {
-      const image = await this.page.locator('#ContentPlaceHolder1_finalotr_div').screenshot({type:'png'});
+    if (!['success','result-image'].includes(step.kind)) return step;
+    try {
+      const panel = this.page.locator('#ContentPlaceHolder1_finalotr_div');
+      const image = await panel.isVisible()
+        ? await panel.screenshot({type:'png'})
+        : await this.page.screenshot({type:'png',fullPage:true});
       this.report({event:'otr-result-image',mode:'recover'});
-      return {kind:'result-image',image};
+      return {...step,image};
+    } catch {
+      // Keep a verified text result if image capture alone fails. Never repeat
+      // the OTP submission to obtain another screenshot.
+      if (step.kind === 'success') return step;
+      return {kind:'unknown'};
     }
-    return step;
   }
   beforeSubmit(step) { if (step.action.kind === 'verify-otp') this.verificationSubmitted = true; }
   async performSubmit(step) {
@@ -81,7 +90,7 @@ export class OtrRecoveryPortal extends OtrPortal {
       if (this.closed) throw new Error('Recovery cancelled');
       try {
         const next = this.classify(await this.snapshot());
-        if (next.kind === 'success' || this.dialogError || (next.kind === 'form' && (next.fingerprint !== step.fingerprint || next.error))) return;
+        if (['success','result-image'].includes(next.kind) || this.dialogError || (next.kind === 'form' && (next.fingerprint !== step.fingerprint || next.error))) return;
       } catch { /* A full navigation briefly destroys the old DOM context. */ }
       await delay(100);
     }

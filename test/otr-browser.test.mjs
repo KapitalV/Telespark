@@ -49,7 +49,9 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     assert.equal(step.stage,'otp');
     assert.equal(f.posts[0].get('ContentPlaceHolder1_txt_mobile'),'9876543210');
     step = await f.portal.submit({otp:'001234'},step.fingerprint);
-    assert.deepEqual(step,{kind:'success',otr:'00012345678901'});
+    assert.equal(step.kind,'success');
+    assert.equal(step.otr,'00012345678901');
+    assert.ok(step.image.length > 0);
     assert.equal(f.posts[1].get('otp'),'001234');
     await f.portal.close();
   });
@@ -64,7 +66,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     const sent = [];
     const telegram = {
       send:async (_id,text,options) => {sent.push({text,options}); return {message_id:outgoing++};},
-      photo:async () => ({message_id:outgoing++}),
+      photo:async (_id,image,text,options) => {sent.push({text,image,options}); return {message_id:outgoing++};},
     };
     const otr = new OtrBot({telegram,allowedUserId:'42',portalFactory:() => f.portal});
     const router = new BotRouter({telegram,allowedUserId:'42',enableOtr:true,otr,recovery:{clear:async()=>{},expire:async()=>{}}});
@@ -75,14 +77,15 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     assert.equal(otr.sessions.get(42).phase,'done');
     assert.ok(sent.at(-1).text.includes('UP26-0000000001'));
     assert.equal(sent.at(-1).options.protect_content,true);
+    assert.ok(sent.at(-1).image.length > 0);
     assert.equal(f.posts[1].get('otp'),'001234');
     assert.equal(f.posts[1].get('ContentPlaceHolder1_txtCaptcha'),'XyZ34');
     await say('/result');
     assert.equal(f.posts.length,2,'Re-delivery must not make a third POST');
   });
 
-  await t.test('Unfamiliar formatting in the verified final panel returns a result image',async () => {
-    const output = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Your OTR is :-</h3><h1>(UP26/0000000001)</h1></div>');
+  await t.test('Final panel screenshot does not depend on heading or identifier formatting',async () => {
+    const output = page('<div id="ContentPlaceHolder1_finalotr_div"><h3>Recovery completed. Keep your number safely.</h3><h1>(UP26/0000000001)</h1></div>');
     const f = await fixture('recover',(_request,_url,posts) => posts.length === 0 ? initial : posts.length === 1 ? otpPage() : output);
     let step = await f.portal.open();
     step = await f.portal.submit({ContentPlaceHolder1_txt_mobile:'9876543210',ContentPlaceHolder1_txtCaptcha:'AbC12'},step.fingerprint);
@@ -120,7 +123,10 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     f.portal.verificationSubmitted = true;
     for (const [heading,value] of [['Your OTR is :-','UP26/0000000001'],['Your OTR is —','UP26-0000000001'],['Your OTR is：','UP26 0000000001'],['Your OTR has been recovered successfully. Your OTR is-','UP26-0000000001']]) {
       await f.portal.page.setContent(page(`<div id="ContentPlaceHolder1_finalotr_div"><h3>${heading}</h3><h1>${value}</h1></div>`));
-      assert.deepEqual(await f.portal.read(),{kind:'success',otr:value});
+      const result = await f.portal.read();
+      assert.equal(result.kind,'success');
+      assert.equal(result.otr,value);
+      assert.ok(result.image.length > 0);
     }
     assert.equal(f.posts.length,0);
   });
@@ -276,7 +282,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
       const sent = [];
       const telegram = {
         send:async (_id,text,options) => {sent.push({text,options}); return {message_id:outgoing++};},
-        photo:async () => ({message_id:outgoing++}),
+        photo:async (_id,image,text,options) => {sent.push({text,image,options}); return {message_id:outgoing++};},
       };
       const otr = new OtrBot({telegram,allowedUserId:'42',portalFactory:() => f.portal});
       const router = new BotRouter({telegram,allowedUserId:'42',enableOtr:true,otr,recovery:{clear:async()=>{},expire:async()=>{}}});

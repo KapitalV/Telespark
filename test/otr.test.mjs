@@ -65,6 +65,9 @@ test('Official result image is protected, re-delivered without submission, and c
   await f.say('/result');
   assert.equal(f.submits.length,1);
   assert.equal(photos.at(-1).image,bytes);
+  await f.say('hello');
+  assert.match(f.sent.at(-1).text,/Website response captured/);
+  assert.doesNotMatch(f.sent.at(-1).text,/confirmed/);
   const state = f.bot.sessions.get(42);
   await f.say('/cancel');
   assert.equal(state.resultImage,undefined);

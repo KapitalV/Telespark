@@ -167,7 +167,9 @@ export class OtrBot {
   }
 
   async deliver(id, state) {
-    if (state.resultImage) return this.telegram.photo(id, state.resultImage, 'The official website displayed this OTR recovery result. Keep the number shown in this image safely.', {protect_content:true});
+    if (state.resultImage) return this.telegram.photo(id, state.resultImage, state.result
+      ? `The official website confirmed your OTR: ${state.result}\nKeep this result screenshot safely.`
+      : 'Official website response after OTR verification. Keep the number shown in this screenshot safely.', {protect_content:true});
     return this.telegram.send(id, `The official website confirmed your OTR: ${state.result}\nKeep this number safely.`, {protect_content:true});
   }
 
@@ -184,7 +186,7 @@ export class OtrBot {
     const command = text.toLowerCase();
     if (command === '/cancel') { await this.clear(id); return this.telegram.send(id, 'Cancelled. Details cleared.'); }
     if (command === '/result' && (state.result || state.resultImage)) return this.deliver(id, state);
-    if (state.phase === 'done') return this.telegram.send(id, 'OTR already confirmed. /result shows it again; /menu returns to the menu.');
+    if (state.phase === 'done') return this.telegram.send(id, `${state.result ? 'OTR already confirmed.' : 'Website response captured.'} /result shows it again; /menu returns to the menu.`);
     if (['unknown','unsupported','blocked'].includes(state.phase)) return this.telegram.send(id, 'This session has stopped. Check the official website or SMS before beginning another request. Use /menu.');
     if (command === '/retry' && state.phase === 'load-failed') return this.open(id, state);
     if (state.phase === 'load-failed') return this.telegram.send(id, 'Use /retry to reopen the page or /cancel to clear the session.');
