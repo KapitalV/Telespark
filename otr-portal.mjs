@@ -1,5 +1,6 @@
 import {chromium} from 'playwright';
 import {classifyOtrPage, OTR_ORIGIN, OTR_PATHS} from './otr-schema.mjs';
+import {diagnosticWords, otrDiagnostic} from './otr-diagnostics.mjs';
 
 export function classifyOtrDialog(text) {
   const invalid = /invalid|incorrect|wrong|expired|गलत|अमान्य|समाप्त/i.test(text);
@@ -63,9 +64,9 @@ export function readOtrDocument() {
 }
 
 export class OtrPortal {
-  constructor({mode, headless = true, channel = process.platform === 'win32' ? 'msedge' : 'chromium', launch = options => chromium.launch(options)} = {}) {
+  constructor({mode, headless = true, channel = process.platform === 'win32' ? 'msedge' : 'chromium', launch = options => chromium.launch(options), onDiagnostic = () => {}} = {}) {
     if (!['recover','register'].includes(mode)) throw new Error('Invalid OTR mode.');
-    Object.assign(this, {mode, headless, channel, launch});
+    Object.assign(this, {mode, headless, channel, launch, onDiagnostic});
     this.closed = false;
   }
 
@@ -90,6 +91,7 @@ export class OtrPortal {
     this.page.on('dialog', async dialog => {
       const text = dialog.message();
       const kind = classifyOtrDialog(text);
+      this.report({event:'otr-dialog',kind,words:diagnosticWords(text)});
       this.dialogError = kind === 'notice' ? undefined : kind;
       await dialog.dismiss().catch(() => {});
     });
@@ -104,6 +106,7 @@ export class OtrPortal {
 
   async snapshot() { return this.page.evaluate(readOtrDocument); }
   classify(snapshot) { return classifyOtrPage(snapshot, this.mode); }
+  report(event) { try { this.onDiagnostic(event); } catch { /* Diagnostics cannot interrupt a submission. */ } }
 
   async read() {
     if (this.externalBlocked) return {kind:'unsupported',reason:'external-verification'};
@@ -123,6 +126,7 @@ export class OtrPortal {
       else step = {kind:'unsupported',reason:'dialog'};
       this.dialogError = undefined;
     }
+    if (step.kind === 'unsupported') this.report(otrDiagnostic(snapshot,step.reason));
     if (step.kind === 'form' && step.fields.some(f => f.type === 'captcha')) step.image = await this.captchaImage();
     this.step = step;
     return step;

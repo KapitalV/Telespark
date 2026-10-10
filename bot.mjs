@@ -63,6 +63,7 @@ const recovery = new RecoveryBot({telegram, allowedUserId:owner,
 })});
 const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
   mode,
+  onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});

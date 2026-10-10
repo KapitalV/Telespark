@@ -8,6 +8,18 @@ const ERRORS = {
   'rate-limit':'The website has limited requests. Wait before trying again.',
 };
 
+const STOP_REASONS = {
+  action:'The website displayed an unsupported submit control.',
+  fields:'The website displayed an unsupported set of input fields.',
+  page:'The website moved to an unsupported page.',
+  dialog:'The website displayed a message the bot could not interpret.',
+  'external-verification':'The website attempted an external verification step.',
+  'changed-form':'The website form changed before submission.',
+  'changed-values':'The website changed an entered value before submission.',
+  'missing-field':'A required answer was missing before submission.',
+  refresh:'The CAPTCHA refresh control was unavailable.',
+};
+
 export class OtrBot {
   constructor({telegram, portalFactory, allowedUserId = '', clock = () => Date.now(), timeoutMs = 75_000}) {
     Object.assign(this, {telegram, portalFactory, allowedUserId:String(allowedUserId), clock, timeoutMs});
@@ -111,7 +123,10 @@ export class OtrBot {
       void portal?.close().catch(() => {});
       return this.deliver(id, state);
     }
-    if (step?.kind !== 'form') return this.stop(id, state, 'unsupported', 'The portal reached an unrecognized form or an external verification step. Automation has stopped; no unknown form was submitted. This experimental stage needs verification before it can be supported. Check the official website or SMS for any completed request. Use /menu to return.');
+    if (step?.kind !== 'form') {
+      const reason = Object.hasOwn(STOP_REASONS, step?.reason ?? '') ? step.reason : 'unknown';
+      return this.stop(id, state, 'unsupported', `${STOP_REASONS[reason] ?? 'The website response could not be recognized.'} Diagnostic: OTR-${reason.toUpperCase()}. No unknown form was submitted. Check SMS for any completed request; use /menu to return. Share this diagnostic code when reporting the problem.`);
+    }
     if (['already-registered','not-found','rate-limit'].includes(step.error)) return this.stop(id, state, 'blocked', `${ERRORS[step.error]} Use /menu when ready.`);
     state.step = step;
     state.phase = 'questions';

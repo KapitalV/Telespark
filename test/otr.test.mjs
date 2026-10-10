@@ -37,6 +37,21 @@ function fixture(steps = [], first = form()) {
   return {bot,router,recovery,portal,telegram,sent,submits,events,message,say,route,advance:ms => {now += ms;}};
 }
 
+test('Unsupported responses expose a bounded diagnostic code without portal data', async () => {
+  const f = fixture([{kind:'unsupported',reason:'action'}]);
+  await f.bot.start(42,'recover');
+  await f.say('9876543210'); await f.say('AbC12');
+  assert.match(f.sent.at(-1).text,/OTR-ACTION/);
+  assert.doesNotMatch(f.sent.at(-1).text,/external verification/);
+  assert.equal(f.bot.sessions.get(42).phase,'unsupported');
+  assert.ok(f.events.includes('close'));
+  const g = fixture([{kind:'unsupported',reason:'private OTP 001234'}]);
+  await g.bot.start(42,'recover');
+  await g.say('9876543210'); await g.say('AbC12');
+  assert.match(g.sent.at(-1).text,/OTR-UNKNOWN/);
+  assert.doesNotMatch(g.sent.at(-1).text,/001234/);
+});
+
 test('OTR validates mobile, OTP, Aadhaar, dates and preserves leading zeros', () => {
   assert.equal(normalizeOtrAnswer(otp,'001234'),'001234');
   assert.throws(() => normalizeOtrAnswer(mobile,'+919876543210'));

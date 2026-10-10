@@ -44,3 +44,20 @@ updated source files; changing files alone does not replace its loaded modules.
 Do not call live recovery verified until this acceptance step succeeds. No
 production restart, webhook change, GitHub push, or deployment is part of this
 local merge.
+
+## Post-CAPTCHA failure investigation, 2026-10-10
+
+The official public recovery form loads again. The reported failure after
+verification has not yet been reproduced with a live applicant session.
+Unsupported responses now display a specific `OTR-ACTION`, `OTR-FIELDS`,
+`OTR-DIALOG`, or other bounded code instead of attributing every failure to
+external verification. Portal diagnostics log control IDs, types, and a closed
+vocabulary of operational words; no raw dialog text, applicant values, result
+numbers, cookies, or URLs are logged. These changes diagnose the failure; they
+do not establish a fix for the unobserved protected response.
+
+Validation: 62 automated tests passed, including browser contract tests and
+existing password recovery tests. Live read-only checks reached the recovery
+mobile/CAPTCHA form and registration declaration. A real Telegram attempt is
+still required. Stop the existing update consumer before running the local bot;
+never run polling consumers on Windows and a server simultaneously.
