@@ -11,7 +11,7 @@ Registration continues to use its separate existing adapter.
 3. Request an OTP once and wait for the website's OTP form. Recognize both Hindi
    and English verification controls, including a masked OTP input.
 4. Collect the OTP and the second CAPTCHA shown by the portal, then submit once
-   and send a protected screenshot of the official result to Telegram. Include
+   and send a downloadable screenshot of the official result to Telegram. Include
    the OTR in the caption when it can also be read reliably as text.
    Accept a result only after this same browser session submitted verification.
 5. `/result` re-delivers the result without another website request. Cancellation,

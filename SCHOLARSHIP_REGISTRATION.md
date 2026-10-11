@@ -12,9 +12,9 @@ Fresh **Postmatric Other Than Intermediate**, studying in Uttar Pradesh
 
 - SC / ST / General, OBC, or Minority department, chosen by the applicant.
 - Existing OTR lookup.
-- District → institution (live options, with ASP.NET postbacks).
+- District is automatically set to **Jalaun**, using its value from the live portal options, followed by the institution list for Jalaun.
 - Category → religion (live dependent options).
-- High-school passing year and board.
+- High-school passing year and **UP BOARD** / **CBSE BOARD** reply buttons. Typed `CBSC` is accepted as an alias for CBSE.
 - Optional roll-number letter prefix (`NONE` if absent), then numeric roll number.
 - Password and matching confirmation, followed by the current CAPTCHA image.
 - Review → literal `CONFIRM` → a single submission → official response screenshot.
@@ -31,6 +31,7 @@ per message; `/search words` filters them, `/search` clears the filter, and
 `/next` pages through matches. Numbers always refer to the original list;
 typed years match their exact label first. Institutions with the same name
 remain separate numbered choices. All number strings preserve leading zeros.
+The district cannot be changed in this flow. If the portal does not offer or retain Jalaun, the bot stops before final registration. Only UP BOARD and CBSE are offered for this registration module; password recovery retains its other supported boards.
 
 `/refresh` replaces the CAPTCHA without discarding already accepted fields.
 `/retry` repeats a prompt after message delivery failure; `/cancel` or `/menu`
@@ -44,6 +45,7 @@ boxes are masked in response screenshots.
 Applicant values and screenshots are kept only in process/browser memory and
 cleared on cancellation or expiry. Telegram itself retains chat messages;
 the bot does not promise to erase Telegram history.
+New messages and response images can be copied, downloaded and forwarded. Earlier protected messages retain their original restrictions.
 
 ## Verification and boundaries
 
@@ -59,7 +61,7 @@ validation, confirmation, CAPTCHA refresh, one final POST, result re-delivery,
 unknown fields and uncertain responses. Run `OTR_BROWSER_TESTS=true npm test`
 (PowerShell: `$env:OTR_BROWSER_TESTS='true'; npm test`).
 
-The protected final receipt has not been manually verified. After the final
+The final receipt layout has not been manually verified. After the final
 submission the bot sends the official response screenshot without claiming
 success from an unverified layout, accepting another declaration, or submitting
 an unknown continuation form. Read the screenshot for completion or validation

@@ -30,6 +30,20 @@ function chat(portal,options={}) {
   return {bot,router,sent,telegram,message,say:(text,extra)=>router.handle(message(text,extra)),advance:ms=>{now+=ms;}};
 }
 
+test('Jalaun selection uses the live value and stops if missing or repeatedly discarded',async()=>{
+  for (const available of [false,true]) {
+    const submitted=[];
+    const field={id:'ContentPlaceHolder1_ddl_district',key:'district',type:'choice',options:[{value:'different',label:'Lucknow'},...(available?[{value:'live-jalaun',label:'Jalaun'}]:[])]};
+    const step={kind:'form',fields:[field],action:{kind:'fill'},fingerprint:'f'};
+    const portal={open:async()=>step,submit:async values=>{submitted.push(values);return step;},close:async()=>{}};
+    const f=chat(portal);
+    for(const answer of ['/start','2','2']) await f.say(answer);
+    assert.equal(f.bot.sessions.get(42).phase,'unsupported');
+    assert.match(f.sent.at(-1).text,/did not offer or retain Jalaun/);
+    assert.deepEqual(submitted,available?[{district:'live-jalaun'},{district:'live-jalaun'}]:[]);
+  }
+});
+
 test('Registration timeouts do not retry submission and clear in-memory passwords',async()=>{
   let submits=0,closed=0;
   const portal={answers:new Map([['ContentPlaceHolder1_txt_pwd',{value:'Example1@'}]]),open:async()=>({kind:'form',fields:[{key:'captcha',type:'captcha'}],action:{kind:'register'},fingerprint:'f',image:Buffer.from('image'),review:['Synthetic student']}),submit:async()=>{submits++;await new Promise(()=>{});},close:async()=>{closed++;portal.answers.clear();}};
@@ -60,7 +74,7 @@ const escape=value=>String(value).replaceAll('&','&amp;').replaceAll('"','&quot;
 const form=body=>`<!doctype html><meta charset="utf-8"><form method="post">${body}</form>`;
 const landing=form(`<script>function __doPostBack(){document.forms[0].action='/RegistrationFormInstituteDIG.aspx?C=MQ==';document.forms[0].submit()}</script><a id="${p}lnbPostFreshOBC" href="javascript:__doPostBack()">Postmatric OBC</a>`);
 function details(values,extra='') {
-  const options={ddl_district:[['46','Lucknow']],ddl_institute:values.get(p+'ddl_district')?Array.from({length:50},(_,i)=>[String(i+1),`College ${i+1}`]):[],ddl_caste:[['1','OBC']],ddl_relegion:values.get(p+'ddl_caste')?[['1','Hindu']]:[],ddl_highschpassyear:[['2021','2021']],ddl_board:[['1','UP BOARD']]};
+  const options={ddl_district:[['46','Lucknow'],['35','Jalaun']],ddl_institute:values.get(p+'ddl_district')?Array.from({length:50},(_,i)=>[String(i+1),`College ${i+1}`]):[],ddl_caste:[['1','OBC']],ddl_relegion:values.get(p+'ddl_caste')?[['1','Hindu']]:[],ddl_highschpassyear:[['2021','2021']],ddl_board:[['1','UP BOARD'],['2','CBSE'],['3','ICSE']]};
   const inputs=REGISTRATION_FIELDS.map(f=>{
     const value=escape(values.get(f.id)||'');
     if (f.type==='choice') {
@@ -105,7 +119,10 @@ test('Registration browser workflow with observed controls (network fully interc
     return {portal,posts};
   }
   async function untilCaptcha(f) {
-    for (const answer of ['/start','2','2','1','UP26-0000000001','1','/search College 42','42','1','1','2021','1','NONE','000012345','Example1@','Wrong1@','Example1@']) await f.say(answer);
+    for (const answer of ['/start','2','2','1','UP26-0000000001','/search College 42','42','1','1','2021']) await f.say(answer);
+    assert.deepEqual(f.bot.sessions.get(42).step.fields[0].options.map(o=>o.label),['UP BOARD','CBSE']);
+    await f.say('ICSE');assert.match(f.sent.at(-1).text,/Choose a listed option/);
+    for(const answer of ['CBSC BOARD','NONE','000012345','Example1@','Wrong1@','Example1@']) await f.say(answer);
     assert.equal(f.bot.sessions.get(42).step.fields[0].type,'captcha');
   }
   await t.test('Menus to dependent fields, review, single submission, screenshot and re-delivery',async()=>{
@@ -116,13 +133,16 @@ test('Registration browser workflow with observed controls (network fully interc
     await f.say('AbC12');assert.equal(f.bot.sessions.get(42).phase,'confirm');
     const review=f.sent.at(-1).text;
     assert.match(review,/College 42/);assert.match(review,/000012345/);assert.match(review,/2021/);assert.doesNotMatch(review,/Example1@/);
+    assert.match(review,/Jalaun/);assert.match(review,/CBSE/);
+    assert.deepEqual(f.sent.find(m=>m.opts?.reply_markup?.keyboard?.[0]?.includes('CBSE BOARD')).opts.reply_markup.keyboard,[['UP BOARD','CBSE BOARD']]);
     const confirm=f.message('CONFIRM');await Promise.all([f.router.handle(confirm),f.router.handle(confirm)]);
     assert.equal(f.bot.sessions.get(42).phase,'done');
-    assert.ok(f.sent.at(-1).image.length>0);assert.equal(f.sent.at(-1).opts.protect_content,true);
+    assert.ok(f.sent.at(-1).image.length>0);assert.equal(f.sent.at(-1).opts.protect_content,false);
     assert.equal(fixtureState.portal.answers.size,0);
     assert.equal(fixtureState.posts.filter(p=>p.has('final')).length,1);
     const posted=fixtureState.posts.find(p=>p.has('final'));
     assert.equal(posted.get(p+'txt_hghrollno'),'000012345');assert.equal(posted.get(p+'txt_hghrollnoA'),'');
+    assert.equal(posted.get(p+'ddl_district'),'35');assert.equal(posted.get(p+'ddl_board'),'2');
     await f.say('/result');await f.say('CONFIRM');
     assert.equal(fixtureState.posts.filter(p=>p.has('final')).length,1);
     await f.say('/cancel');assert.equal(f.bot.sessions.size,0);

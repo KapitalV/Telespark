@@ -1,7 +1,7 @@
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, registration, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, registration, allowedUserId:String(allowedUserId), enableOtr, clock});
+  constructor({telegram, recovery, otr, registration, access, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, access, allowedUserId:String(allowedUserId), enableOtr, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
@@ -43,11 +43,12 @@ export class BotRouter {
     const text = message.text.trim();
     const command = text.split(/\s/)[0].toLowerCase();
     if (command === '/id') return this.recovery.handle(message);
-    if (!this.allowedUserId || String(message.from.id) !== this.allowedUserId) {
-      return this.telegram.send(id, 'This bot is restricted to the configured owner. Send /id for setup.');
+    if (!(this.access ? this.access.canUse(message.from.id) : this.allowedUserId && String(message.from.id)===this.allowedUserId)) {
+      return this.telegram.send(id, 'Access is restricted. Send /id and ask the admin to add that user ID.');
     }
     if (!Number.isSafeInteger(message.message_id) || message.message_id <= (this.lastMessages.get(id) ?? -1)) return;
     this.lastMessages.set(id, message.message_id);
+    if (['/adduser','/removeuser','/users','/admin'].includes(command)) return this.adminCommand(message,command);
     await this.expire();
     if (command === '/cancel') {
       await this.clear(id);
@@ -58,7 +59,7 @@ export class BotRouter {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this session\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — show a verified result\n/boards — password recovery boards\n/id — setup ID');
+    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this session\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — resend a saved result or screenshot\n/boards — password recovery boards\n/search words, /next — registration institution search\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();
@@ -89,5 +90,26 @@ export class BotRouter {
     if (state.module === 'password') return this.recovery.handle(message);
     if (state.module === 'registration') return this.registration.handle(message);
     return this.otr.handle(message);
+  }
+
+  async adminCommand(message,command) {
+    const id=message.chat.id;
+    if (!this.access?.isAdmin(message.from.id)) return this.telegram.send(id,'Only the admin can manage user access.');
+    if(command==='/admin') return this.telegram.send(id,'Admin commands:\n/adduser ID — allow a Telegram user\n/removeuser ID — revoke access and clear their active session\n/users — list allowed users\nAsk each person to send /id to this bot.');
+    if(command==='/users') {
+      const users=this.access.list();
+      const lines=[`Admin: ${this.access.adminId}`,`Allowed users: ${users.length}`,...users];
+      for(let i=0;i<lines.length;i+=100) await this.telegram.send(id,lines.slice(i,i+100).join('\n'));
+      return;
+    }
+    const args=message.text.trim().split(/\s+/);
+    if(args.length!==2) return this.telegram.send(id,`Usage: ${command} 123456789`);
+    try {
+      const changed=await this.access.change(message.from.id,args[1],command==='/adduser');
+      if(command==='/removeuser') await this.clear(Number(args[1]));
+      return this.telegram.send(id,command==='/adduser'
+        ? `User ${args[1]} ${changed?'now has access':'already has access'}. They can send /start.`
+        : `User ${args[1]} ${changed?'was removed':'was not on the allowed list'}. Access is disabled.`);
+    } catch(error) {return this.telegram.send(id,error.message);}
   }
 }

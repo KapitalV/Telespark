@@ -192,13 +192,13 @@ test('Password results tolerate label spacing and English labels but never confl
   assert.equal(parsePortalResult('https://scholarship.up.gov.in/ForgetPwd.aspx','Captcha is incorrect','').kind,'captcha');
 });
 
-test('Unrecognized official response is delivered as a protected screenshot with no success claim or repeat',async()=>{
+test('Unrecognized official response is delivered as a copyable screenshot with no success claim or repeat',async()=>{
   const slip=Buffer.from('official response');
   const f=fixture([{kind:'response-image',slip}]);const documents=[];
   f.telegram.document=async (...args)=>{documents.push(args);return {message_id:300};};
   await f.fill();await f.say('AbC12');
   assert.equal(f.bot.sessions.get(42).phase,'done');
-  assert.equal(documents[0][1],slip);assert.equal(documents[0][4].protect_content,true);
+  assert.equal(documents[0][1],slip);assert.equal(documents[0][4].protect_content,false);
   assert.match(documents[0][3],/Completion is not confirmed/);
   await f.say('/result');await f.say('AbC12');
   assert.equal(f.submissions.length,1);assert.equal(documents.length,2);

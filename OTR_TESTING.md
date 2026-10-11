@@ -102,7 +102,7 @@ that redirect does not count as a live verification of the protected form.
 
 - `router.mjs`: menus, access checks, sequential per-chat routing, cleanup.
 - `otr-core.mjs`: field prompts, validation, confirmation, OTP/CAPTCHA lifetimes,
-  duplicate protection, explicit retry handling, and protected results.
+  duplicate protection, explicit retry handling, and copyable results.
 - `otr-portal.mjs` / `otr-schema.mjs`: isolated browser context, live form
   structure, explicit recognized action types, ASP.NET postback waits, and
   conservative result classification.

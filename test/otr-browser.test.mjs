@@ -76,7 +76,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
     await say('XyZ34');
     assert.equal(otr.sessions.get(42).phase,'done');
     assert.ok(sent.at(-1).text.includes('UP26-0000000001'));
-    assert.equal(sent.at(-1).options.protect_content,true);
+    assert.equal(sent.at(-1).options.protect_content,false);
     assert.ok(sent.at(-1).image.length > 0);
     assert.equal(f.posts[1].get('otp'),'001234');
     assert.equal(f.posts[1].get('ContentPlaceHolder1_txtCaptcha'),'XyZ34');
@@ -300,7 +300,7 @@ test('Browser-backed OTR adapter contracts (all network requests intercepted)', 
       assert.equal(f.posts[0].get('ContentPlaceHolder1_txt_mobile'),'9876543210');
       assert.equal(f.posts[1].get('otp'),'001234');
       assert.match(sent.at(-1).text,/00012345678901/);
-      assert.equal(sent.at(-1).options.protect_content,true);
+      assert.equal(sent.at(-1).options.protect_content,false);
     }
   });
 });

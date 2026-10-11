@@ -8,3 +8,4 @@ test
 *.jpg
 *.png
 outputs
+data

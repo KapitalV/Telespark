@@ -52,7 +52,7 @@ test('Unsupported responses expose a bounded diagnostic code without portal data
   assert.doesNotMatch(g.sent.at(-1).text,/001234/);
 });
 
-test('Official result image is protected, re-delivered without submission, and cleared on cancellation', async () => {
+test('Official result image is copyable, re-delivered without submission, and cleared on cancellation', async () => {
   const bytes = Buffer.from('synthetic official result image');
   const f = fixture([{kind:'result-image',image:bytes}]);
   const photos = [];
@@ -60,7 +60,7 @@ test('Official result image is protected, re-delivered without submission, and c
   await f.bot.start(42,'recover');
   await f.say('9876543210'); await f.say('AbC12');
   assert.equal(f.bot.sessions.get(42).phase,'done');
-  assert.equal(photos.at(-1).options.protect_content,true);
+  assert.equal(photos.at(-1).options.protect_content,false);
   assert.equal(photos.at(-1).image,bytes);
   await f.say('/result');
   assert.equal(f.submits.length,1);
@@ -114,7 +114,7 @@ test('OTR disabled by default; owner/private-chat restriction cannot be bypassed
   assert.equal(f.router.sessions.has(99),false);
 });
 
-test('Full recovery contract: request OTP once, verify once, protect result and clear inputs', async () => {
+test('Full recovery contract: request OTP once, verify once, deliver copyable result and clear inputs', async () => {
   const f = fixture([form([otp],'verify-otp'),{kind:'success',otr:'00012345678901'}]);
   await f.bot.start(42,'recover');
   await f.say('9876543210');
@@ -128,7 +128,7 @@ test('Full recovery contract: request OTP once, verify once, protect result and 
   assert.equal(f.bot.sessions.get(42).phase,'done');
   assert.deepEqual(f.bot.sessions.get(42).values,{});
   assert.equal(f.bot.sessions.get(42).portal,undefined);
-  assert.equal(f.sent.at(-1).options.protect_content,true);
+  assert.equal(f.sent.at(-1).options.protect_content,false);
 });
 
 test('Registration requires declaration agreement and a separate final confirmation', async () => {

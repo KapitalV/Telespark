@@ -93,6 +93,10 @@ export class RegistrationPortal extends OtrPortal {
         const live = s.fields.find(f=>f.id===spec.id);
         if (spec.type === 'choice' && !live.options.length) return {kind:'unsupported',reason:'fields'};
         field = {...live,...spec};
+        if (spec.id === prefix+'ddl_board') {
+          field.options=live.options.filter(o=>['UP BOARD','CBSE'].includes(o.label.toUpperCase()));
+          if (field.options.length!==2) return {kind:'unsupported',reason:'fields'};
+        }
         delete field.value;
         action = {kind:spec.type === 'captcha' ? 'register' : 'fill',id:prefix+'btn_submit'};
       }
@@ -121,6 +125,7 @@ export class RegistrationPortal extends OtrPortal {
     if (step.kind !== 'form' || step.fingerprint !== fingerprint) return {kind:'unsupported',reason:'changed-form'};
     const field = step.fields[0], value = values[field.key];
     if (typeof value !== 'string') return {kind:'unsupported',reason:'missing-field'};
+    if (field.options && !field.options.some(o=>o.value===value)) return {kind:'unsupported',reason:'fields'};
     if (step.action.kind === 'choose') {
       const option = field.options.find(o=>o.value===value);
       if (!option) return {kind:'unsupported',reason:'fields'};

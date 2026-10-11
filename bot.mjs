@@ -11,6 +11,7 @@ import {OtrPortal} from './otr-portal.mjs';
 import {OtrRecoveryPortal} from './otr-recovery.mjs';
 import {RegistrationBot} from './registration-core.mjs';
 import {RegistrationPortal} from './registration-portal.mjs';
+import {AccessStore} from './access.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -42,7 +43,7 @@ class Telegram {
     return data.result;
   }
   send(chatId, text, options = {}) {
-    return this.api('sendMessage', {chat_id:chatId,text,reply_markup:{remove_keyboard:true},...options});
+    return this.api('sendMessage', {chat_id:chatId,text,reply_markup:{remove_keyboard:true},...options,protect_content:false});
   }
   upload(method, field, chatId, bytes, filename, caption, options = {}) {
     const form = new FormData();
@@ -50,6 +51,7 @@ class Telegram {
     form.set(field,new Blob([bytes],{type:'image/png'}),filename);
     form.set('caption',caption);
     for (const [key,value] of Object.entries(options)) form.set(key,String(value));
+    form.set('protect_content','false');
     return this.api(method,form,true);
   }
   photo(chatId, bytes, caption, options) { return this.upload('sendPhoto','photo',chatId,bytes,'Image.png',caption,options); }
@@ -57,24 +59,28 @@ class Telegram {
 }
 
 const telegram = new Telegram();
-const recovery = new RecoveryBot({telegram, allowedUserId:owner,
+let access;
+try {access=new AccessStore({adminId:owner,path:process.env.ACCESS_STORE_PATH || undefined});await access.load();}
+catch(error) {console.error(error.message);process.exit(1);}
+const canUse=id=>access.canUse(id);
+const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:() => new ScholarshipPortal({
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
-const otr = new OtrBot({telegram, allowedUserId:owner, portalFactory:mode => new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
+const otr = new OtrBot({telegram, allowedUserId:owner,canUse, portalFactory:mode => new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
   mode,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
-const registration = new RegistrationBot({telegram,allowedUserId:owner,portalFactory:()=>new RegistrationPortal({
+const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,portalFactory:()=>new RegistrationPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 })});
-const bot = new BotRouter({telegram, recovery, otr, registration, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
+const bot = new BotRouter({telegram, recovery, otr, registration, access, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
 // Expire sensitive in-memory sessions even when no webhook messages arrive.
 const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
 cleanupTimer.unref();
@@ -119,7 +125,7 @@ try {
       // Keep pending updates: the message that wakes a sleeping service must not be discarded.
     });
     ready = true;
-    console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id and configure your owner ID.'} Webhook mode ready.`);
+    console.log(`Connected to @${me.username}. ${owner ? 'Admin-managed user access enabled.' : 'Setup mode: send /id and configure your owner ID.'} Webhook mode ready.`);
     if (process.env.PORTAL_STARTUP_CHECK === 'true') {
       console.log(JSON.stringify(await probeConnection()));
       for (const applicationType of ['Renewal','Fresh']) {
@@ -130,7 +136,7 @@ try {
     const webhook = await telegram.api('getWebhookInfo',{});
     if (webhook.url) throw new Error('A webhook is configured for this token. Stop the cloud service and remove its webhook before switching to polling.');
     const me = await telegram.api('getMe',{});
-    console.log(`Connected to @${me.username}. ${owner ? 'Owner-only recovery enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
+    console.log(`Connected to @${me.username}. ${owner ? 'Admin-managed user access enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
   // Do not replay old CAPTCHA replies after restarting: a previous submission may have succeeded.
   const previous = await telegram.api('getUpdates',{offset:-1,limit:1,timeout:0,allowed_updates:['message']});
   let offset = previous.length ? previous[0].update_id + 1 : 0;

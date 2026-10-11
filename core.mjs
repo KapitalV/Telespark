@@ -1,3 +1,5 @@
+import {BOARD_KEYBOARD,boardName} from './board-options.mjs';
+
 export const BOARDS = [
   'UP BOARD', 'CBSE', 'ICSE', 'National Institute of Open Schooling',
   'Jammu and Kashmir Board', 'Rajasthan Board', 'Himachal Pradesh Board',
@@ -52,7 +54,7 @@ export function normalizeAnswer(field, input) {
     return value;
   }
   if (field === 'board') {
-    const match = BOARDS.find(board => board.toLowerCase() === value.toLowerCase().replace(/^up$/, 'up board'));
+    const match = BOARDS.find(board => board.toUpperCase() === boardName(value));
     if (!match) throw new Error('Board not recognized. Use /boards and copy its exact name.');
     return match;
   }
@@ -90,10 +92,11 @@ export function parsePortalResult(url, text, expectedRegistration) {
 }
 
 export class RecoveryBot {
-  constructor({telegram, portalFactory, allowedUserId = '', clock = () => Date.now(), prepareTimeoutMs = 75_000, onDiagnostic = () => {}}) {
+  constructor({telegram, portalFactory, allowedUserId = '', canUse, clock = () => Date.now(), prepareTimeoutMs = 75_000, onDiagnostic = () => {}}) {
     this.telegram = telegram;
     this.portalFactory = portalFactory;
     this.allowedUserId = String(allowedUserId);
+    this.canUse = canUse;
     this.clock = clock;
     this.sessions = new Map();
     this.prepareTimeoutMs = prepareTimeoutMs;
@@ -118,10 +121,10 @@ export class RecoveryBot {
     const chatId = message.chat.id;
     const text = message.text.trim();
     const command = text.split(/\s/)[0].toLowerCase();
-    const send = (value) => this.telegram.send(chatId, value);
-    if (command === '/id') return send(`Your Telegram user ID: ${message.from.id}\nPut this in TELEGRAM_ALLOWED_USER_ID in .env, then restart the bot.`);
-    if (!this.allowedUserId || String(message.from.id) !== this.allowedUserId) {
-      return send('Recovery is restricted to the configured owner. Send /id to get your ID for setup.');
+    const send = (value,options) => this.telegram.send(chatId, value,options);
+    if (command === '/id') return send(`Your Telegram user ID: ${message.from.id}\nSend this ID to the bot admin to request access.${!this.allowedUserId ? '\nFor initial setup, put your admin ID in TELEGRAM_ALLOWED_USER_ID in .env and restart.' : ''}`);
+    if (!this.authorized(message.from.id)) {
+      return send('Ask the admin to allow your Telegram user ID. Send /id to get it.');
     }
     await this.expire();
     if (command === '/cancel') { await this.clear(chatId); return send('Cancelled. Send /start for a new recovery.'); }
@@ -154,7 +157,10 @@ export class RecoveryBot {
       catch (error) { return send(error.message); }
       if (state.phase === 'questions') {
         state.index++;
-        if (state.index < QUESTIONS.length) return send(questionAt(state.index, state.details)[1]);
+        if (state.index < QUESTIONS.length) {
+          const [nextField,prompt]=questionAt(state.index,state.details);
+          return send(prompt,nextField==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);
+        }
       }
       return this.prepare(chatId, state);
     }
@@ -175,6 +181,7 @@ export class RecoveryBot {
     let result;
     try { result = await state.portal.submit(text); }
     catch { result = {kind:'unknown'}; }
+    if (this.sessions.get(chatId)!==state || !this.authorized(message.from.id)) return;
     if (result.kind === 'success' || result.kind === 'response-image') {
       state.result = result;
       state.phase = 'done';
@@ -190,7 +197,7 @@ export class RecoveryBot {
     if (result.kind === 'correction') {
       state.phase = 'correction';
       state.correction = result.field;
-      return send(result.message);
+      return send(result.message,result.field==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);
     }
     state.phase = 'unknown';
     state.details = {};
@@ -199,12 +206,15 @@ export class RecoveryBot {
     return send('The request was submitted, but I could not verify success or a recognized error. Check the official portal before repeating it. I will not submit again automatically.');
   }
 
+  authorized(id) {return this.canUse ? this.canUse(id) : !!this.allowedUserId && String(id)===this.allowedUserId;}
+
   async prepare(chatId, state) {
     state.phase = 'preparing';
     let timer;
     let stage = 'progress-message';
     try {
       await this.telegram.send(chatId, 'All six details received. Loading the official website and CAPTCHA; this may take up to 75 seconds.');
+      if (this.sessions.get(chatId)!==state || !this.authorized(chatId)) return;
       state.portal ??= this.portalFactory();
       stage = 'form';
       const image = await Promise.race([
@@ -214,6 +224,7 @@ export class RecoveryBot {
         }, this.prepareTimeoutMs); }),
       ]);
       clearTimeout(timer);
+      if (this.sessions.get(chatId)!==state || !this.authorized(chatId)) return;
       stage = 'telegram-image';
       const sent = await this.telegram.photo(chatId, image, 'Type the CAPTCHA exactly as shown. Your reply submits this recovery request. /refresh gives a new image; /cancel stops.');
       state.captchaMessageId = sent.message_id;
@@ -226,6 +237,7 @@ export class RecoveryBot {
       state.portal = undefined;
       // Cleanup must not prevent the user from receiving a failure message.
       void portal?.close().catch(() => {});
+      if (this.sessions.get(chatId)!==state || !this.authorized(chatId)) return;
       const safeStage = ['browser','website','application-type','details','board','year','verify-fields','captcha'].includes(error.stage) ? error.stage : stage;
       const safeCode = /^(?:ERR_[A-Z_]+|TIMEOUT)$/.test(error.code ?? '') ? error.code : 'FAILED';
       this.onDiagnostic({event:'prepare-failed',stage:safeStage,code:safeCode});
@@ -239,9 +251,9 @@ export class RecoveryBot {
   async deliver(chatId, state) {
     const {registration, password, slip} = state.result;
     if (state.result.kind === 'response-image') {
-      return this.telegram.document(chatId,slip,'Recovery-response.png','Official portal page after the recovery attempt. Completion is not confirmed. Read the screenshot for the result or error before repeating recovery. /result re-sends this image without another submission.',{protect_content:true});
+      return this.telegram.document(chatId,slip,'Recovery-response.png','Official portal page after the recovery attempt. Completion is not confirmed. Read the screenshot for the result or error before repeating recovery. /result re-sends this image without another submission.',{protect_content:false});
     }
-    await this.telegram.send(chatId, `Recovery succeeded.\nRegistration: ${registration}\nLatest password: ${password}\nCase-sensitive. Use this latest result instead of an earlier password.`, {protect_content:true});
-    if (slip) await this.telegram.document(chatId, slip, 'Recovery-slip.png', 'Your latest recovery slip.', {protect_content:true});
+    await this.telegram.send(chatId, `Recovery succeeded.\nRegistration: ${registration}\nLatest password: ${password}\nCase-sensitive. Use this latest result instead of an earlier password.`, {protect_content:false});
+    if (slip) await this.telegram.document(chatId, slip, 'Recovery-slip.png', 'Your latest recovery slip.', {protect_content:false});
   }
 }

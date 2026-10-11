@@ -21,8 +21,8 @@ const STOP_REASONS = {
 };
 
 export class OtrBot {
-  constructor({telegram, portalFactory, allowedUserId = '', clock = () => Date.now(), timeoutMs = 75_000}) {
-    Object.assign(this, {telegram, portalFactory, allowedUserId:String(allowedUserId), clock, timeoutMs});
+  constructor({telegram, portalFactory, allowedUserId = '', canUse, clock = () => Date.now(), timeoutMs = 75_000}) {
+    Object.assign(this, {telegram, portalFactory, allowedUserId:String(allowedUserId), canUse, clock, timeoutMs});
     this.sessions = new Map();
   }
 
@@ -169,12 +169,14 @@ export class OtrBot {
   async deliver(id, state) {
     if (state.resultImage) return this.telegram.photo(id, state.resultImage, state.result
       ? `The official website confirmed your OTR: ${state.result}\nKeep this result screenshot safely.`
-      : 'Official website response after OTR verification. Keep the number shown in this screenshot safely.', {protect_content:true});
-    return this.telegram.send(id, `The official website confirmed your OTR: ${state.result}\nKeep this number safely.`, {protect_content:true});
+      : 'Official website response after OTR verification. Keep the number shown in this screenshot safely.', {protect_content:false});
+    return this.telegram.send(id, `The official website confirmed your OTR: ${state.result}\nKeep this number safely.`, {protect_content:false});
   }
 
+  authorized(id) {return this.canUse ? this.canUse(id) : !!this.allowedUserId && String(id)===this.allowedUserId;}
+
   async handle(message) {
-    if (!message?.from || message.from.is_bot || message.chat?.type !== 'private' || !message.text || !this.allowedUserId || String(message.from.id) !== this.allowedUserId) return;
+    if (!message?.from || message.from.is_bot || message.chat?.type !== 'private' || !message.text || !this.authorized(message.from.id)) return;
     const id = message.chat.id;
     await this.expire();
     const state = this.sessions.get(id);
@@ -235,7 +237,7 @@ export class OtrBot {
       const display = ['aadhaar','mobile'].includes(f.type) ? `••••${value.slice(-4)}` : f.options?.find(o => o.value === value)?.label ?? value;
       return `${f.label}: ${display}`;
     }).join('\n');
-    const sent = await this.telegram.send(id, `Review the final details:\n${summary}\nType CONFIRM to submit OTR registration, or /cancel. Only one OTR is permitted per student.`, {protect_content:true});
+    const sent = await this.telegram.send(id, `Review the final details:\n${summary}\nType CONFIRM to submit OTR registration, or /cancel. Only one OTR is permitted per student.`, {protect_content:false});
     state.promptId = sent.message_id;
     state.promptAt = this.clock();
   }

@@ -55,7 +55,13 @@ Press Ctrl+C in PowerShell. Put that numeric ID into `.env`:
 TELEGRAM_ALLOWED_USER_ID=YOUR_NUMERIC_ID
 ```
 
-Start the bot again with the same command. Only that configured account can perform recovery. Group chats are ignored.
+Start the bot again with the same command. That configured account is the admin. Only the admin and users the admin explicitly adds can use the bot. Group chats are ignored.
+
+### Admin-managed access
+
+Ask another user to open the bot privately and send `/id`. As the configured admin, send `/adduser 123456789` with their numeric ID. They can then send `/start` and use all enabled modules. Use `/users` to list allowed IDs and `/removeuser 123456789` to revoke access and clear their active session. `/admin` shows these commands. Added users cannot manage access or view the allowed-user list. Each chat has separate answers, browser sessions and results.
+
+Access changes survive restarts in `data/authorized-users.json`; this file contains user IDs only and is excluded from Git and Docker build context. Optionally set `ACCESS_STORE_PATH` to another writable path. On a hosted service, put this file on a persistent disk to retain grants across redeployments. Keep `TELEGRAM_ALLOWED_USER_ID` set to your own admin ID; `/adduser` does not require editing `.env` or restarting.
 
 ## 5. Recover your password
 
@@ -64,19 +70,19 @@ Send `/start` to your bot. It asks, in order:
 1. Fresh or Renewal
 2. Registration number for the required session
 3. Renewal: date of birth in DD/MM/YYYY. Fresh: registered 10-digit mobile number.
-4. Class 10 board (UP BOARD, CBSE, ICSE, or `/boards` for the full list)
+4. Class 10 board (UP BOARD and CBSE BOARD buttons; `/boards` lists other supported recovery boards)
 5. Class 10 passing year as entered in your original application
 6. Class 10 roll number, preserving leading zeros
 
 The bot fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits the recovery request. There is no additional confirmation prompt in this user-operated program. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
 
-After success, the bot sends your latest password and a PNG recovery slip. If the official page is readable but its outcome is unrecognized, the bot sends a protected screenshot labelled as unconfirmed, so you can read the website's response. A result labelled with a different registration number is not delivered. Repeated recovery may generate a different password. Use `/result` to resend a saved result or response screenshot without submitting again.
+After success, the bot sends your latest password and a PNG recovery slip. If the official page is readable but its outcome is unrecognized, the bot sends a screenshot labelled as unconfirmed, so you can read the website's response. A result labelled with a different registration number is not delivered. Repeated recovery may generate a different password. Use `/result` to resend a saved result or response screenshot without submitting again. New text and images allow copying, saving, downloading and forwarding; previously protected messages keep their existing Telegram restrictions.
 
 ## Commands
 
 | Command | Action |
 | --- | --- |
-| `/start` | Start a new recovery and ask the six questions |
+| `/start`, `/menu` | Open the service menu |
 | `/id` | Show your Telegram user ID for setup |
 | `/boards` | List supported board names |
 | `/refresh` | Refill the form and show a new CAPTCHA |
@@ -84,6 +90,10 @@ After success, the bot sends your latest password and a PNG recovery slip. If th
 | `/result` | Resend the completed result without resetting the password |
 | `/cancel` | Close the browser session and clear the current details |
 | `/help` | Show commands |
+| `/admin` | Show admin-only access commands |
+| `/adduser ID` | Admin: grant a Telegram user access |
+| `/removeuser ID` | Admin: revoke access and clear that user's session |
+| `/users` | Admin: list allowed user IDs |
 
 ## Running and handling errors
 
@@ -91,7 +101,7 @@ For local polling mode, keep this PowerShell process and your PC running with in
 
 An invalid CAPTCHA produces a new image while retaining the six details. A recognized mismatch requests only the affected field, such as Class 10 passing year. The response reader handles page navigation, in-place responses and validation alerts. After a navigation deadline it still checks the currently rendered official page. Unknown results stop further submission attempts because the password might already have changed. Check the response screenshot or official site before intentionally starting another recovery. Response diagnostics contain only a result category, an allowlisted page category, HTTP status and whether the click reported an error; they never include answers or passwords.
 
-CAPTCHA replies older than five minutes are not submitted. Idle sessions and completed results are removed from memory after twenty minutes. Restarting clears memory and skips old queued messages to avoid replaying CAPTCHA replies. Tokens, applicant details, passwords, and slips are not written to program logs or local storage; they do travel through Telegram and remain subject to Telegram's chat storage. Protected result messages reduce forwarding and saving but are not end-to-end encryption.
+CAPTCHA replies older than five minutes are not submitted. Idle sessions and completed results are removed from memory after twenty minutes. Restarting clears memory and skips old queued messages to avoid replaying CAPTCHA replies. Applicant details, passwords, and slips are not written to program logs or local storage; they do travel through Telegram and remain subject to Telegram's chat storage. The bot token remains in the local environment configuration; the authorized-user file stores access IDs only. Result messages can be copied or saved.
 
 The bot supports authorized postmatric recovery and the fresh scholarship registration form described below. The website can change its fields, sessions, or verification flow. The bot does not decide scholarship eligibility.
 
@@ -107,7 +117,7 @@ npm.cmd test
 
 Use `npm.cmd run test:portal` for a live check of both Fresh and Renewal through all six questions to CAPTCHA capture. It uses synthetic data and a local Telegram adapter, never sends chat messages, and never submits recovery. Browser installation is required. A live Telegram/password reset test still needs the owner's real answers and CAPTCHA reply.
 
-The automated tests exercise input validation, owner-only access, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
+The automated tests exercise input validation, admin-only access changes, persistent grants, isolated user sessions, revocation, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
 
 The live website field IDs and success/error text were observed during development. End-to-end Telegram operation requires your token and owner ID and has not been verified until those are configured. The Windows setup uses the installed Microsoft Edge to avoid a bundled browser download.
 
@@ -143,7 +153,7 @@ tests and awaits a real applicant submission. No live registration was created
 during development. The older create-new-OTR adapter remains separate from the
 second menu action. Unknown fields or external verification stop the session.
 
-The bot remains owner-only and private-chat-only. It stores OTR session values
+The bot allows only the configured admin and explicitly authorized users in private chats. It stores OTR session values
 in memory, clears OTP inputs after each attempted submission, closes idle
 sessions after 20 minutes, and does not log submitted values. Telegram messages
 themselves still exist in the chat; session cleanup does not delete chat history.
