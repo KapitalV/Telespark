@@ -1,14 +1,18 @@
+import {LOG_COMMANDS,formatActivity} from './activity.mjs';
+import {questionAt} from './core.mjs';
+import {telegramUserId} from './access.mjs';
+
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, registration, access, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, registration, access, allowedUserId:String(allowedUserId), enableOtr, clock});
+  constructor({telegram, recovery, otr, registration, access, activity, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, access, activity, allowedUserId:String(allowedUserId), enableOtr, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
   }
 
   handle(message) {
-    if (!message?.from || message.from.is_bot || message.chat?.type !== 'private' || !message.text) return Promise.resolve();
+    if (!message?.from || message.from.is_bot || message.chat?.type !== 'private') return Promise.resolve();
     // Serialize even when called outside the polling/webhook queues.
     const id = message.chat.id;
     const previous = this.locks.get(id) ?? Promise.resolve();
@@ -23,9 +27,14 @@ export class BotRouter {
   }
 
   async expire() {
+    const previous=[...this.sessions.keys()].map(id=>({id,...this.activityContext(id)}));
     await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire()]);
     for (const [id, state] of this.sessions) {
       if (this.clock() - state.updated > 20 * 60_000) await this.clear(id);
+    }
+    for(const before of previous) {
+      const after=this.activityContext(before.id);
+      if(before.phase!=='none' && after.phase==='none') await this.activity?.record({event:'session_expired',userId:before.id,module:before.module,phase:before.phase});
     }
   }
 
@@ -33,22 +42,62 @@ export class BotRouter {
     await this.clear(id);
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
     const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR']];
-    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.', {
+    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity is logged for the admin: user ID, actions and outcomes. Your answers, passwords, OTPs and images are excluded.', {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
   }
 
+  activityContext(id) {
+    const module=this.sessions.get(id)?.module || 'none';
+    const state=({password:this.recovery,otr:this.otr,registration:this.registration}[module])?.sessions?.get(id);
+    const phase=state?.phase || (['menu','otr-menu'].includes(module)?module:'none');
+    const field=module==='password'
+      ? (phase==='questions'?questionAt(state.index,state.details)?.[0]:phase==='correction'?state.correction:phase==='captcha'?'captcha':undefined)
+      : state?.step?.fields?.[state.index]?.type;
+    const result=phase==='unknown'?'unknown':phase==='done'?(module==='password'?state.result?.kind:state.result?'success':'result-image'):undefined;
+    return {module,phase,field,result};
+  }
+
   async route(message) {
+    const id=message.chat.id,userId=message.from.id,messageId=message.message_id;
+    if(!Number.isSafeInteger(messageId) || messageId<1) return;
+    if(messageId<=(this.lastMessages.get(id) ?? -1)) {
+      await this.activity?.record({event:'ignored',userId,messageId,reason:'duplicate'});return;
+    }
+    this.lastMessages.set(id,messageId);
+    if(typeof message.text!=='string' || !message.text.trim()) {
+      await this.activity?.record({event:'ignored',userId,messageId,reason:'unsupported-message'});return;
+    }
+    const text=message.text.trim(),command=text.split(/\s/)[0].toLowerCase();
+    const before=this.activityContext(id);
+    let action=text.startsWith('/')?(LOG_COMMANDS.has(command)?command:'unknown-command'):'answer';
+    if(before.module==='menu' && /^1(?:\.|$)/.test(text)) action='choose-password';
+    if(before.module==='menu' && /^2(?:\.|$)/.test(text)) action='choose-otr';
+    if(before.module==='otr-menu' && /^1(?:\.|$)/.test(text)) action='choose-recovery';
+    if(before.module==='otr-menu' && /^2(?:\.|$)/.test(text)) action='choose-registration';
+    if(before.module==='otr-menu' && /^back$/i.test(text)) action='back';
+    if(before.phase==='confirm' && /^confirm$/i.test(text)) action='confirm';
+    await this.activity?.record({event:'message',userId,messageId,action,...before});
+    try {
+      const result=await this.dispatch(message);
+      await this.activity?.record({event:'handled',userId,messageId,action,...this.activityContext(id)});
+      return result;
+    } catch(error) {
+      await this.activity?.record({event:'handled',userId,messageId,action,...this.activityContext(id),result:'failed'});
+      throw error;
+    }
+  }
+
+  async dispatch(message) {
     const id = message.chat.id;
     const text = message.text.trim();
     const command = text.split(/\s/)[0].toLowerCase();
     if (command === '/id') return this.recovery.handle(message);
     if (!(this.access ? this.access.canUse(message.from.id) : this.allowedUserId && String(message.from.id)===this.allowedUserId)) {
+      await this.activity?.record({event:'denied',userId:message.from.id,messageId:message.message_id,reason:'access'});
       return this.telegram.send(id, 'Access is restricted. Send /id and ask the admin to add that user ID.');
     }
-    if (!Number.isSafeInteger(message.message_id) || message.message_id <= (this.lastMessages.get(id) ?? -1)) return;
-    this.lastMessages.set(id, message.message_id);
-    if (['/adduser','/removeuser','/users','/admin'].includes(command)) return this.adminCommand(message,command);
+    if (['/adduser','/removeuser','/users','/admin','/log'].includes(command)) return this.adminCommand(message,command);
     await this.expire();
     if (command === '/cancel') {
       await this.clear(id);
@@ -59,7 +108,7 @@ export class BotRouter {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this session\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — resend a saved result or screenshot\n/boards — password recovery boards\n/search words, /next — registration institution search\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users':''));
+    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this session\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — resend a saved result or screenshot\n/boards — password recovery boards\n/search words, /next — registration institution search\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();
@@ -94,8 +143,12 @@ export class BotRouter {
 
   async adminCommand(message,command) {
     const id=message.chat.id;
-    if (!this.access?.isAdmin(message.from.id)) return this.telegram.send(id,'Only the admin can manage user access.');
-    if(command==='/admin') return this.telegram.send(id,'Admin commands:\n/adduser ID — allow a Telegram user\n/removeuser ID — revoke access and clear their active session\n/users — list allowed users\nAsk each person to send /id to this bot.');
+    if (!this.access?.isAdmin(message.from.id)) {
+      await this.activity?.record({event:'denied',userId:message.from.id,action:command,reason:'admin-only'});
+      return this.telegram.send(id,'Only the admin can manage user access or view activity logs.');
+    }
+    if(command==='/log') return this.logCommand(message);
+    if(command==='/admin') return this.telegram.send(id,'Admin commands:\n/adduser ID — allow a Telegram user\n/removeuser ID — revoke access and clear their active session\n/users — list allowed users\n/log — recent activity\n/log user ID — activity for one user\n/log export YYYY-MM-DD — download a daily log\nAsk each person to send /id to this bot.');
     if(command==='/users') {
       const users=this.access.list();
       const lines=[`Admin: ${this.access.adminId}`,`Allowed users: ${users.length}`,...users];
@@ -106,10 +159,50 @@ export class BotRouter {
     if(args.length!==2) return this.telegram.send(id,`Usage: ${command} 123456789`);
     try {
       const changed=await this.access.change(message.from.id,args[1],command==='/adduser');
+      await this.activity?.record({event:'access_changed',userId:message.from.id,targetUserId:args[1],action:command==='/adduser'?'grant':'revoke',result:changed?'changed':'unchanged'});
       if(command==='/removeuser') await this.clear(Number(args[1]));
       return this.telegram.send(id,command==='/adduser'
         ? `User ${args[1]} ${changed?'now has access':'already has access'}. They can send /start.`
         : `User ${args[1]} ${changed?'was removed':'was not on the allowed list'}. Access is disabled.`);
-    } catch(error) {return this.telegram.send(id,error.message);}
+    } catch(error) {
+      await this.activity?.record({event:'access_changed',userId:message.from.id,action:command==='/adduser'?'grant':'revoke',result:'failed'});
+      return this.telegram.send(id,error.message);
+    }
+  }
+
+  async logCommand(message) {
+    const id=message.chat.id;
+    if(!this.activity) return this.telegram.send(id,'Activity logging is unavailable in this bot build.');
+    const args=message.text.trim().split(/\s+/).slice(1);
+    const usage='Admin activity logs (IST):\n/log — latest 20 entries\n/log 50 — latest 50 (maximum 100)\n/log user ID [count] — filter by actor or affected user\n/log export YYYY-MM-DD — download one day\nLogs contain actions and outcomes, not message text or submitted values.';
+    if(args[0]==='help') return this.telegram.send(id,usage);
+    let records,file,userId,limit=20;
+    try {
+      if(args[0]==='export' && args.length===2) file=await this.activity.exportDay(args[1]);
+      else {
+        if(args[0]==='user' && [2,3].includes(args.length)) {userId=telegramUserId(args[1]);if(args[2]) limit=Number(args[2]);}
+        else if(args.length===1 && /^\d+$/.test(args[0])) limit=Number(args[0]);
+        else if(args.length) throw new Error('Invalid log command.');
+        records=await this.activity.recent({userId,limit});
+      }
+    } catch {
+      await this.activity.record({event:'system_error',userId:message.from.id,action:'/log',reason:'invalid-arguments'});
+      return this.telegram.send(id,'Could not read that log. Check the date, user ID and count; the file may be missing or unavailable. Daily downloads are limited to 20 MB.\n'+usage);
+    }
+    const warning=(this.activity.hadWriteFailure?'\nWarning: a log write failed during this run; history may be incomplete.':'')+(this.activity.hadReadFailure?'\nWarning: damaged or incomplete entries were skipped.':'');
+    if(file) {
+      await this.telegram.document(id,file.bytes,file.filename,'Daily activity log. Dates use IST; JSON timestamps use UTC. Submitted values are excluded.'+warning);
+      await this.activity.record({event:'log_exported',userId:message.from.id,action:'/log'});return;
+    }
+    const lines=[`Activity log — newest first (IST)${userId?` — User ${userId}`:''}${warning}`,...records.map(formatActivity)];
+    if(!records.length) lines.push('No recorded activity for this filter.');
+    lines.push('/log help — filters and download commands');
+    let chunk='';
+    for(const line of lines) {
+      if(chunk.length+line.length+1>3500) {await this.telegram.send(id,chunk);chunk='';}
+      chunk+=(chunk?'\n':'')+line;
+    }
+    if(chunk) await this.telegram.send(id,chunk);
+    await this.activity.record({event:'log_viewed',userId:message.from.id,targetUserId:userId,action:'/log'});
   }
 }

@@ -63,6 +63,27 @@ Ask another user to open the bot privately and send `/id`. As the configured adm
 
 Access changes survive restarts in `data/authorized-users.json`; this file contains user IDs only and is excluded from Git and Docker build context. Optionally set `ACCESS_STORE_PATH` to another writable path. On a hosted service, put this file on a persistent disk to retain grants across redeployments. Keep `TELEGRAM_ALLOWED_USER_ID` set to your own admin ID; `/adduser` does not require editing `.env` or restarting.
 
+### Admin activity history
+
+Only the configured admin can use `/log`. Other allowed users cannot view or download the history.
+
+| Command | Activity history |
+| --- | --- |
+| `/log` | Latest 20 entries across all users, newest first |
+| `/log 50` | Latest 50 entries (allowed range: 1–100) |
+| `/log user 123456789` | Latest activity by that user, plus access changes affecting them |
+| `/log user 123456789 50` | Latest 50 entries for that user |
+| `/log export 2026-10-11` | Download that day's JSONL file, up to 20 MB |
+| `/log help` | Command examples |
+
+Daily files are saved in `data/activity/YYYY-MM-DD.jsonl` and survive local restarts. No separate database is needed. Set `ACTIVITY_LOG_DIR` to a writable persistent disk directory on a hosted server; ephemeral hosting storage is not durable across redeployments. Files are excluded from Git and Docker build context through `data/`. There is no automatic history deletion. Larger daily files can be read directly on the server.
+
+The main menu tells users that activity is logged. Records include the Telegram user ID, timestamp, known command or action, module, input-field **type**, current stage, classified website result, access denial, admin grants/revocations, duplicate updates, expiry, delivery failures and bot lifecycle/network events. Requests are recorded before processing and their state afterwards; `handled` means the handler returned, not that the website accepted an answer. `portal_started / submit` records a portal method attempt, not proof of a completed website POST. A screenshot-only result stays unconfirmed. Force-killing the process cannot produce a clean shutdown record.
+
+Raw chat text, command arguments, applicant identifiers, names, mobile numbers, dates of birth, passwords, OTPs, CAPTCHA answers, images, portal HTML and raw exception messages are **not** stored. Authorized/admin Telegram IDs are stored for attribution. Both writes and exports accept only fixed event fields and classifications. Group chats are ignored. Logs start when this version runs; old Telegram conversations are not imported.
+
+Dates in filenames and `/log` displays use IST; JSON timestamps use UTC. Writes are serialized and flushed to disk. If logging cannot initialize, startup stops with a clear configuration error. A later write failure is reported in the runtime console and `/log` warns that history may be incomplete; a logging failure never retries a website submission. Damaged records are skipped with a warning.
+
 ## 5. Recover your password
 
 Send `/start` to your bot. It asks, in order:
@@ -94,6 +115,7 @@ After success, the bot sends your latest password and a PNG recovery slip. If th
 | `/adduser ID` | Admin: grant a Telegram user access |
 | `/removeuser ID` | Admin: revoke access and clear that user's session |
 | `/users` | Admin: list allowed user IDs |
+| `/log` | Admin: recent activity, user filters and daily downloads |
 
 ## Running and handling errors
 
@@ -117,7 +139,7 @@ npm.cmd test
 
 Use `npm.cmd run test:portal` for a live check of both Fresh and Renewal through all six questions to CAPTCHA capture. It uses synthetic data and a local Telegram adapter, never sends chat messages, and never submits recovery. Browser installation is required. A live Telegram/password reset test still needs the owner's real answers and CAPTCHA reply.
 
-The automated tests exercise input validation, admin-only access changes, persistent grants, isolated user sessions, revocation, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
+The automated tests exercise input validation, admin-only access changes and logs, persistent grants/history, isolated user sessions, revocation, sensitive-data exclusion, daily exports, the six-question flow, corrections, CAPTCHA expiry, duplicate replies, unknown outcomes, and result delivery failures using fake portal/Telegram adapters. They do not submit live recovery requests.
 
 The live website field IDs and success/error text were observed during development. End-to-end Telegram operation requires your token and owner ID and has not been verified until those are configured. The Windows setup uses the installed Microsoft Edge to avoid a bundled browser download.
 

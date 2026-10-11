@@ -37,7 +37,7 @@ export class RegistrationBot extends OtrBot {
   }
   async open(id,state) {
     await this.telegram.send(id,'Loading the official registration page; this can take up to 75 seconds.');
-    return this.operation(id,state,()=>{state.portal=this.portalFactory();return state.portal.open();});
+    return this.operation(id,state,()=>{state.portal=this.portalFactory(id);return state.portal.open();});
   }
   normalizeAnswer(field,text,state) {
     return normalizeRegistrationAnswer(field,text,state.portal.answers.get('ContentPlaceHolder1_txt_pwd')?.value);

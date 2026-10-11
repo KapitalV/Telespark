@@ -215,7 +215,7 @@ export class RecoveryBot {
     try {
       await this.telegram.send(chatId, 'All six details received. Loading the official website and CAPTCHA; this may take up to 75 seconds.');
       if (this.sessions.get(chatId)!==state || !this.authorized(chatId)) return;
-      state.portal ??= this.portalFactory();
+      state.portal ??= this.portalFactory(chatId);
       stage = 'form';
       const image = await Promise.race([
         state.portal.open(state.details),

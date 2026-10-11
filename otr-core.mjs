@@ -89,7 +89,7 @@ export class OtrBot {
   async open(id, state) {
     await this.telegram.send(id, 'Loading the official OTR page; this can take up to 75 seconds.');
     return this.operation(id, state, () => {
-      state.portal = this.portalFactory(state.mode);
+      state.portal = this.portalFactory(state.mode,id);
       return state.portal.open();
     });
   }
