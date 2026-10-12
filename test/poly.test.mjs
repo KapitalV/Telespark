@@ -11,17 +11,20 @@ import {POLY_SECTIONS,normalizePoly,percentage} from '../poly-schema.mjs';
 import {projectFields} from '../saved-schema.mjs';
 import {safeActivity} from '../activity.mjs';
 
-async function fixture(t,{result={kind:'complete',stage:'form'},enabled=true,timeoutMs=1000}={}) {
+async function fixture(t,{result={kind:'complete',stage:'form'},enabled=true,timeoutMs=1000,pdfFails=false,chooseStep}={}) {
   const root=await mkdtemp(join(tmpdir(),'telespark-poly-'));
   t.after(async()=>{assert.equal(dirname(resolve(root)),resolve(tmpdir()));assert.ok(basename(root).startsWith('telespark-poly-'));await rm(root,{recursive:true,force:true});});
   const store=new SavedStore({directory:join(root,'records'),keyFile:join(root,'key')});await store.init();
-  let now=Date.now(),incoming=1,outgoing=100,submits=0,opens=0,logins=0,documents=0,closed=0,failDelivery=false;
+  let now=Date.now(),incoming=1,outgoing=100,submits=0,opens=0,logins=0,documents=0,closed=0,failDelivery=false,pdfRequests=0;
   const sent=[],events=[],access={canUse:id=>[42,99].includes(Number(id)),isAdmin:id=>Number(id)===42};
   const telegram={send:async(id,text,options)=>{sent.push({id,text,options});return {message_id:outgoing++};},photo:async(id,bytes,text)=>{sent.push({id,bytes,text});return {message_id:outgoing++};},document:async(id,bytes,name)=>{documents++;if(failDelivery) throw Error('delivery failed');sent.push({id,bytes,name});}};
   let step={kind:'review',stage:'fee',review:['Fee: 11010'],declaration:'Synthetic declaration for test only',token:1};
-  let portal;
   const poly=new PolyBot({telegram,store,canUse:access.canUse,clock:()=>now,timeoutMs,portalFactory:()=>{
-    portal={closed:false,answers:new Map([['txt_refundAmt',{value:'11010',display:'11010'}]]),open:async()=>{opens++;return Buffer.from('captcha');},login:async()=>{logins++;return {kind:'dashboard'};},choose:async operation=>operation==='pdf'?{kind:'pdf',bytes:Buffer.from('%PDF-synthetic-test-only'),pages:1}:step,home:async()=>({kind:'dashboard'}),captcha:async()=>Buffer.from('fresh-captcha'),refreshLogin:async()=>Buffer.from('fresh-login'),values:()=>({}),fill:async()=>step,submit:async()=>{submits++;return typeof result==='function'?result():result;},close:async()=>{closed++;portal.closed=true;}};
+    let registration;
+    const portal={closed:false,answers:new Map([['txt_refundAmt',{value:'11010',display:'11010'}]]),open:async()=>{opens++;return Buffer.from('captcha');},login:async details=>{registration=details.registration;logins++;return {kind:'dashboard'};},choose:async operation=>{
+      if(operation==='pdf') {pdfRequests++;if(pdfFails) throw Error('PDF failed');return {kind:'pdf',bytes:Buffer.from('%PDF-synthetic-test-only '+registration),pages:1};}
+      return chooseStep?chooseStep(operation):step;
+    },home:async()=>({kind:'dashboard'}),captcha:async()=>Buffer.from('fresh-captcha'),refreshLogin:async()=>Buffer.from('fresh-login'),values:()=>({}),fill:async()=>step,submit:async()=>{submits++;return typeof result==='function'?result():result;},close:async()=>{closed++;portal.closed=true;}};
     portal.read=async()=>step;return portal;
   }});
   const activity={record:async e=>events.push(safeActivity(e,new Date(now).toISOString()))};
@@ -31,7 +34,7 @@ async function fixture(t,{result={kind:'complete',stage:'form'},enabled=true,tim
   const message=(text,extra={})=>({message_id:incoming++,from:{id:99},chat:{id:99,type:'private'},text,...extra});
   const say=(text,extra)=>router.handle(message(text,extra));
   const login=async(operation='1')=>{for(const value of ['/start','3',operation,'000012345678','UP26-0000000001','TemporarySecret1@','AbC12']) await say(value);};
-  return {root,store,poly,router,saves,sent,events,access,say,message,login,step:v=>{step=v;},advance:ms=>{now+=ms;},failDelivery:v=>{failDelivery=v;},counts:()=>({submits,opens,logins,documents,closed})};
+  return {root,store,poly,router,saves,sent,events,access,say,message,login,step:v=>{step=v;},advance:ms=>{now+=ms;},failDelivery:v=>{failDelivery=v;},counts:()=>({submits,opens,logins,documents,closed,pdfRequests})};
 }
 
 test('Poly validation preserves leading zeros and validates percentage/account confirmation',()=>{
@@ -111,4 +114,42 @@ test('Selections paginate/filter live options and stale replies do not fill',asy
   const f=await fixture(t);f.step({kind:'field',stage:'bank',field:{key:'ddl_bankname',label:'Bank',type:'choice',options:Array.from({length:100},(_,i)=>({value:String(i+1),label:`Bank ${i}`}))},token:1});
   await f.login();await f.say('/search Bank 9');assert.ok(f.sent.at(-1).options.reply_markup.keyboard.some(r=>r[0].includes('Bank 99')));
   await f.say('1',{reply_to_message:{message_id:1}});assert.match(f.sent.at(-1).text,/older step/);
+});
+
+test('Completed form continues into certificates and confirmed certificates automatically save/send the PDF',async t=>{
+  let verified=false;
+  const record={kind:'record',stage:'caste',record:'Synthetic verified candidate',token:5};
+  const f=await fixture(t,{chooseStep:operation=>operation==='fill'?{kind:'complete',stage:'form'}:record,result:()=>{verified=true;return {kind:'complete',stage:'certificates'};}});
+  await f.login();assert.equal(f.poly.sessions.get(99).phase,'record');assert.equal(f.counts().pdfRequests,0);
+  const message=f.message('MATCH');await Promise.all([f.router.handle(message),f.router.handle(message)]);
+  assert.ok(verified);assert.equal(f.counts().submits,1);assert.equal(f.counts().pdfRequests,1);assert.equal(f.counts().documents,1);
+  const s=f.poly.sessions.get(99);assert.equal(s.phase,'done');assert.ok(s.pdfPersisted);
+  const saved=await f.store.get(s.savedId,99);assert.equal(saved.result.kind,'pdf');assert.equal(saved.fields.registration.value,'000012345678');
+  assert.ok(f.sent.find(m=>m.name)?.bytes.toString().includes('000012345678'));assert.equal(f.sent.find(m=>m.name).id,99);
+});
+
+test('Already-verified certificates automatically print, and two authorized users receive their own PDF only',async t=>{
+  const f=await fixture(t,{chooseStep:()=>({kind:'complete',stage:'certificates'})});
+  for(const [id,registration] of [[99,'000012345678'],[42,'000098765432']]) {
+    const extra={from:{id},chat:{id,type:'private'}};
+    for(const answer of ['/start','3','2',registration,'UP26-0000000001','TemporarySecret1@','AbC12']) await f.say(answer,extra);
+  }
+  assert.equal(f.counts().submits,0);assert.equal(f.counts().pdfRequests,2);
+  const documents=f.sent.filter(m=>m.name);assert.equal(documents.length,2);
+  assert.ok(documents.find(m=>m.id===99).bytes.toString().includes('000012345678'));
+  assert.ok(documents.find(m=>m.id===42).bytes.toString().includes('000098765432'));
+  assert.notEqual(f.poly.sessions.get(42).savedId,f.poly.sessions.get(99).savedId);
+  await assert.rejects(f.store.get(f.poly.sessions.get(99).savedId,42));
+});
+
+test('PDF download/delivery failure after verification never repeats certificate verification',async t=>{
+  for(const pdfFails of [true,false]) {
+    const f=await fixture(t,{pdfFails,result:{kind:'complete',stage:'certificates'}});
+    f.step({kind:'record',stage:'caste',record:'Synthetic candidate',token:8});await f.login('2');
+    if(!pdfFails) f.failDelivery(true);
+    await f.say('MATCH');assert.equal(f.counts().submits,1);assert.equal(f.counts().pdfRequests,1);
+    if(pdfFails) {assert.match(f.sent.at(-1).text,/verification is confirmed, but PDF preparation failed/);await f.say('/retry');}
+    else {f.failDelivery(false);await f.say('/result');assert.equal(f.counts().documents,2);}
+    assert.equal(f.counts().submits,1);assert.equal(f.counts().pdfRequests,1);
+  }
 });

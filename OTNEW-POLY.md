@@ -11,6 +11,17 @@ Main menu option **3. Form filling OTNew-Poly** contains:
 2. Verify income and caste
 3. Download check-print PDF
 
+The main form-filling action automatically continues to income/caste verification
+after entry is complete. Once the portal confirms both certificates, the bot
+automatically opens check print, validates and encrypts the PDF, and sends it to
+the same authorized private chat. There is no extra "download" selection at the
+end. Already-verified certificates are skipped and lead directly to the PDF.
+The standalone PDF action remains available for later retrieval or a new login.
+If PDF preparation fails after verification, the bot preserves the confirmed
+verification outcome and asks for a fresh PDF-only login; it does not repeat
+certificate verification. A failed Telegram delivery can be retried with
+`/result` using the retained PDF.
+
 The bot asks for the existing registration number, OTR, password and current
 CAPTCHA, then creates a separate authenticated browser session. Credentials from
 the development conversation are never embedded in source or fixtures.
@@ -116,3 +127,8 @@ To explicitly repeat only that transport test, use
 `node --env-file=.env scripts/check-poly-pdf-delivery.mjs --send-to-admin PATH_TO_SYNTHETIC_PDF`.
 The script requires the marked synthetic fixture, sends only to the configured
 admin's private chat and does not consume updates or contact the portal.
+
+The automatic form → certificate verification → PDF delivery update also passed
+the full suite: 134 tests, zero failures and zero skips. New coverage checks
+automatic continuation, already-verified certificates, two-user document
+isolation and PDF failures without repeating certificate verification.
