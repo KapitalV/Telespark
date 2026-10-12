@@ -78,7 +78,7 @@ test('Only admin grants/revokes; allowed users reach every module with isolated 
 test('Revoking a user suppresses delivery from an already in-flight recovery',async t=>{
   const {access}=await store(t);await access.change(42,99,true);const f=botFixture(access);
   for(const text of ['/start','1','Renewal','000123456789','01/01/2000','UP BOARD','2021','000012345']) await f.say(99,text);
-  assert.deepEqual(f.sent.find(m=>m.options?.reply_markup)?.options.reply_markup.keyboard,[['1. Password recovery'],['2. OTR']]);
+  assert.deepEqual(f.sent.find(m=>m.options?.reply_markup)?.options.reply_markup.keyboard,[['1. Password recovery'],['2. OTR'],['3. Form filling OTNew-Poly']]);
   assert.ok(f.sent.some(m=>JSON.stringify(m.options?.reply_markup?.keyboard)===JSON.stringify([['UP BOARD','CBSE BOARD']])));
   let finish;const pending=new Promise(resolve=>{finish=resolve;});
   f.recovery.sessions.get(99).portal.submit=()=>pending;

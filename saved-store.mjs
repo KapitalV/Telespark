@@ -4,7 +4,7 @@ import {randomBytes,randomUUID,createCipheriv,createDecipheriv} from 'node:crypt
 import {telegramUserId} from './access.mjs';
 import {projectFields,projectResult,SAVE_STATUS} from './saved-schema.mjs';
 
-const idPattern=/^[RP]-[a-f0-9]{32}$/;
+const idPattern=/^[RPF]-[a-f0-9]{32}$/;
 const failure=()=>new Error('Saved session unavailable. Check the session ID, owner and encrypted storage.');
 export class SavedStore {
   constructor({directory=resolve('data','saved-sessions'),keyFile=resolve('data','private','saved-session.key'),clock=()=>Date.now()}={}) {
@@ -39,7 +39,7 @@ export class SavedStore {
       decrypt.setAAD(Buffer.from('telespark/saved/v1/'+id));decrypt.setAuthTag(tag);
       const bytes=Buffer.concat([decrypt.update(Buffer.from(envelope.ciphertext,'base64')),decrypt.final()]);
       let value;try {value=JSON.parse(bytes.toString('utf8'));} finally {bytes.fill(0);}
-      if(value.id!==id || !SAVE_STATUS[value.status] || !['registration','password'].includes(value.module)) throw failure();
+      if(value.id!==id || !SAVE_STATUS[value.status] || !['registration','password','poly'].includes(value.module)) throw failure();
       telegramUserId(value.userId);value.fields=projectFields(value.module,value.fields);value.result=projectResult(value.result);
       return value;
     } catch {throw failure();}
@@ -69,7 +69,7 @@ export class SavedStore {
       if(id) {
         record=await this.read(id);
         if(record.userId!==userId || record.module!==module || !['draft','ready'].includes(record.status)) throw failure();
-      } else record={version:1,id:(module==='password'?'P-':'R-')+randomUUID().replaceAll('-',''),userId,module,createdAt:now,attempts:0};
+      } else record={version:1,id:(module==='password'?'P-':module==='poly'?'F-':'R-')+randomUUID().replaceAll('-',''),userId,module,createdAt:now,attempts:0};
       Object.assign(record,{fields,status:ready?'ready':'draft',updatedAt:now});
       await this.write(record);return record;
     });
@@ -100,7 +100,8 @@ export class SavedStore {
       if((userId && record.userId!==userId) || (module && record.module!==module)) continue;
       // Only status metadata crosses this boundary, including for admin lists.
       const {id,userId:owner,module:service,status,createdAt,updatedAt,attempts}=record;
-      records.push({id,userId:owner,module:service,status,createdAt,updatedAt,attempts});
+      const stage=service==='poly'&&/^(academic|personal|bank|fee|income|caste|form|certificates|check-print PDF)$/.test(record.fields.status?.value||'')?record.fields.status.value:undefined;
+      records.push({id,userId:owner,module:service,status,createdAt,updatedAt,attempts,...(stage?{stage}:{})});
     }
     records.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id));
     return {total:records.length,page,records:records.slice((page-1)*10,page*10)};

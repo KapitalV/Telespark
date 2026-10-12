@@ -15,6 +15,8 @@ import {AccessStore} from './access.mjs';
 import {ActivityLog,loggedPortal} from './activity.mjs';
 import {SavedStore} from './saved-store.mjs';
 import {SavedSessions} from './saved-sessions.mjs';
+import {PolyBot} from './poly-core.mjs';
+import {PolyPortal} from './poly-portal.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -51,7 +53,7 @@ class Telegram {
   upload(method, field, chatId, bytes, filename, caption, options = {}) {
     const form = new FormData();
     form.set('chat_id',String(chatId));
-    form.set(field,new Blob([bytes],{type:filename.endsWith('.jsonl')?'application/x-ndjson':'image/png'}),filename);
+    form.set(field,new Blob([bytes],{type:filename.endsWith('.pdf')?'application/pdf':filename.endsWith('.jsonl')?'application/x-ndjson':'image/png'}),filename);
     form.set('caption',caption);
     for (const [key,value] of Object.entries(options)) form.set(key,String(value));
     form.set('protect_content','false');
@@ -92,7 +94,8 @@ const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,sa
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 }),activity,{userId,module:'registration'})});
-const bot = new BotRouter({telegram, recovery, otr, registration, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
+const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:()=>new PolyPortal({headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
+const bot = new BotRouter({telegram, recovery, otr, registration, poly, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true'});
 // Expire sensitive in-memory sessions even when no webhook messages arrive.
 const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
 cleanupTimer.unref();

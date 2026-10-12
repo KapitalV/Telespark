@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node --env-file=.env bot.mjs",
     "test": "node --test",
@@ -11,5 +13,8 @@
     "test:otr-portal": "node scripts/check-otr-portal.mjs",
     "install-browser": "playwright install chromium"
   },
-  "dependencies": { "playwright": "1.64.0" }
+  "dependencies": {
+    "pdfjs-dist": "4.10.38",
+    "playwright": "1.64.0"
+  }
 }

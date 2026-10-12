@@ -1,12 +1,13 @@
 import {PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
 import {questionAt,normalizeAnswer} from './core.mjs';
+import {POLY_FIELDS} from './poly-schema.mjs';
 
 const dateFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',dateStyle:'short',timeStyle:'short',hour12:false});
-const commandFor=module=>module==='password'?'/psave':'/dsave';
+const commandFor=module=>module==='password'?'/psave':module==='poly'?'/save':'/dsave';
 export class SavedSessions {
   constructor({store,telegram,access,activity,clock=()=>Date.now()}) {Object.assign(this,{store,telegram,access,activity,clock});}
   bind(router) {this.router=router;}
-  bot(module) {return module==='password'?this.router.recovery:this.router.registration;}
+  bot(module) {return module==='password'?this.router.recovery:module==='poly'?this.router.poly:this.router.registration;}
   async log(userId,event,module) {await this.activity?.record({event,userId,module});}
   async sendLines(id,lines) {
     let chunk='';
@@ -39,6 +40,7 @@ export class SavedSessions {
     return this.telegram.send(id,`Details are ready. Before submitting, open /save and choose ${commandFor(module)} to save an encrypted copy. Saving includes passwords and results; OTPs, CAPTCHA answers and cookies are excluded.`,{reply_markup:{keyboard:[['/save']],resize_keyboard:true,one_time_keyboard:true}});
   }
   async dashboard(id,args=[]) {
+    if(this.router.sessions.get(id)?.module==='poly') await this.router.poly?.checkpoint(id,{ready:this.router.poly.sessions.get(id)?.phase==='confirm'});
     const state=this.router.sessions.get(id),active=state && this.bot(state.module)?.sessions.get(id);
     if(active && ['password','registration'].includes(state.module)) {active.saveMenuOpened=true;active.updated=this.clock();}
     let userId=String(id),page=1;
@@ -47,15 +49,15 @@ export class SavedSessions {
     else return this.telegram.send(id,'Use /save [page]. Admin: /save user ID [page].');
     const list=await this.store.list({userId,page});
     await this.sendLines(id,[`Saved sessions — ${userId?'your records':'all users, status only'} — page ${page}`,
-      ...list.records.map(r=>`${r.id}\nUser ${r.userId} | ${r.module} | ${SAVE_STATUS[r.status]} | ${dateFormat.format(new Date(r.updatedAt))} IST | Attempts: ${r.attempts}`),
+      ...list.records.map(r=>`${r.id}\nUser ${r.userId} | ${r.module}${r.stage?' / '+r.stage:''} | ${SAVE_STATUS[r.status]} | ${dateFormat.format(new Date(r.updatedAt))} IST | Attempts: ${r.attempts}`),
       ...(list.total?[]:['No saved sessions yet.']),`Total: ${list.total}. /save ${page+1} shows the next page.`,
-      'Choose /dsave for registration or /psave for password recovery. Add a session ID to retrieve your own record. Retrieval makes no website request.']);
+      'Choose /dsave for registration or /psave for password recovery. OTNew-Poly: /save SESSION_ID for details, /result SESSION_ID for the PDF. Retrieval makes no website request.']);
     await this.telegram.send(id,'Save current details or browse your records:',{reply_markup:{keyboard:[['/dsave','/psave']],resize_keyboard:true,one_time_keyboard:true}});
   }
   async handle(message,command) {
     const id=message.chat.id,args=message.text.trim().split(/\s+/).slice(1);
     try {
-      if(command==='/save') return await this.dashboard(id,args);
+      if(command==='/save') return args.length===1&&args[0].startsWith('F-')?await this.show(id,args[0],'poly'):await this.dashboard(id,args);
       if(command==='/reuse') {
         if(args.length!==1) return this.telegram.send(id,'Use /reuse SESSION_ID to start a fresh session from your saved fields.');
         return await this.reuse(id,args[0]);
@@ -97,7 +99,7 @@ export class SavedSessions {
   }
   async show(id,sessionId,module) {
     const record=await this.store.get(sessionId,id);if(record.module!==module) throw new Error('Wrong module.');
-    const labels=module==='password'?PASSWORD_FIELDS:REGISTRATION_SAVED_FIELDS;
+    const labels=module==='password'?PASSWORD_FIELDS:module==='poly'?POLY_FIELDS:REGISTRATION_SAVED_FIELDS;
     const lines=[`${record.id} — ${SAVE_STATUS[record.status]}`,`Updated: ${dateFormat.format(new Date(record.updatedAt))} IST`,
       ...Object.entries(record.fields).map(([key,field])=>`${labels[key]}: ${(field.label ?? field.value) || '(none)'}`)];
     if(record.result?.password) lines.push(`Latest recovered password: ${record.result.password}`);
@@ -105,6 +107,7 @@ export class SavedSessions {
     lines.push(`Viewing this record does not contact the website. /reuse ${record.id} loads its fields into a fresh session; new verification and saving are required.`);
     await this.sendLines(id,lines);
     if(!this.access.canUse(id)) return;
+    if(record.result?.kind==='pdf') await this.router.poly.storedResult(id,sessionId);
     if(record.result?.image) await this.telegram.document(id,Buffer.from(record.result.image,'base64'),`${record.id}.png`,'Saved official website response. Use the saved status and image to assess the outcome.');
     await this.telegram.send(id,'Reuse saved details only when you intend to start a new request:',{reply_markup:{keyboard:[[`/reuse ${record.id}`],['/save']],resize_keyboard:true,one_time_keyboard:true}});
     await this.log(id,'session_viewed',module);
@@ -138,6 +141,7 @@ export class SavedSessions {
   }
   async reuse(id,sessionId) {
     const record=await this.store.get(sessionId,id);
+    if(record.module==='poly'&&!this.router.enablePoly) return this.telegram.send(id,'OTNew-Poly is disabled pending live validation. Saved details and PDFs remain available.');
     if(record.module==='registration' && !this.router.enableOtr) return this.telegram.send(id,'Registration is disabled in this bot build.');
     await this.router.clear(id);
     if(!this.access.canUse(id)) return;
@@ -145,6 +149,7 @@ export class SavedSessions {
     await this.telegram.send(id,`Reusing fields from ${record.id} (${SAVE_STATUS[record.status]}). This creates a new session. Previously submitted or uncertain records are never replayed automatically. Review the live details and complete a new save/verification before submission.`);
     await this.log(id,'session_reused',record.module);
     if(record.module==='password') return this.router.recovery.reuse(id,record.fields);
+    if(record.module==='poly') return this.router.poly.start(id,record.fields);
     return this.router.registration.start(id,record.fields);
   }
 }

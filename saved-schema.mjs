@@ -1,3 +1,4 @@
+import {POLY_FIELDS} from './poly-schema.mjs';
 export const PASSWORD_FIELDS={applicationType:'Application type',registration:'Registration number',dob:'Date of birth',mobile:'Registered mobile',board:'High-school board',year:'Passing year',roll:'Roll number'};
 const p='ContentPlaceHolder1_';
 export const REGISTRATION_SAVED_FIELDS={
@@ -8,7 +9,7 @@ export const REGISTRATION_SAVED_FIELDS={
 };
 export const SAVE_STATUS={draft:'Draft',ready:'Ready',attempted:'Submission attempted',confirmed:'Confirmed success',uncertain:'Outcome uncertain'};
 export function projectFields(module,fields={}) {
-  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:undefined;
+  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:module==='poly'?POLY_FIELDS:undefined;
   if(!allowed) throw new Error('Unsupported saved module.');
   const clean={};
   for(const key of Object.keys(allowed).sort()) {
@@ -20,8 +21,12 @@ export function projectFields(module,fields={}) {
 }
 export function projectResult(result) {
   if(!result) return undefined;
-  if(!['success','response-image','result-image','unknown'].includes(result.kind)) throw new Error('Unsupported saved result.');
+  if(!['success','response-image','result-image','unknown','pdf'].includes(result.kind)) throw new Error('Unsupported saved result.');
   const clean={kind:result.kind};
+  if(result.kind==='pdf') {
+    if(typeof result.pdf!=='string'||result.pdf.length>23*1024*1024||!/^[A-Za-z0-9+/]*={0,2}$/.test(result.pdf)||Buffer.from(result.pdf,'base64').subarray(0,5).toString()!=='%PDF-') throw Error('Invalid saved PDF.');
+    clean.pdf=result.pdf;return clean;
+  }
   for(const key of ['registration','password']) if(result[key]!==undefined) {
     if(typeof result[key]!=='string' || result[key].length>2000) throw new Error('Invalid saved result.');
     clean[key]=result[key];
