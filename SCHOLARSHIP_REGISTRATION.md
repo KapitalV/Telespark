@@ -17,7 +17,7 @@ Fresh **Postmatric Other Than Intermediate**, studying in Uttar Pradesh
 - High-school passing year and **UP BOARD** / **CBSE BOARD** reply buttons. Typed `CBSC` is accepted as an alias for CBSE.
 - Optional roll-number letter prefix (`NONE` if absent), then numeric roll number.
 - Password and matching confirmation, followed by the current CAPTCHA image.
-- Review → literal `CONFIRM` → a single submission → official response screenshot.
+- Review → `/save` → `/dsave` → literal `CONFIRM` → a single submission → official response screenshot.
 
 The bot does not choose eligibility, caste, religion, or institution for the applicant.
 Prematric, classes 11–12, other-state applications and renewal forms are not
@@ -43,7 +43,11 @@ a digit, and at least one of `@ # $ &` (checked against the official page's
 client validation). Passwords are excluded from reviews and logs; password input
 boxes are masked in response screenshots.
 Applicant values and screenshots are kept only in process/browser memory and
-cleared on cancellation or expiry. Telegram itself retains chat messages;
+cleared on cancellation or expiry unless saved through `/save` and `/dsave`.
+The encrypted saved record, including the chosen password and result image,
+persists through restart and can be retrieved by its owner with `/dsave SESSION_ID`.
+See [SAVED_SESSIONS.md](SAVED_SESSIONS.md) for reuse, status and key backup.
+Telegram itself retains chat messages;
 the bot does not promise to erase Telegram history.
 New messages and response images can be copied, downloaded and forwarded. Earlier protected messages retain their original restrictions.
 

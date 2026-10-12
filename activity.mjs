@@ -6,12 +6,12 @@ import {telegramUserId} from './access.mjs';
 
 // A closed vocabulary prevents submitted values, portal text and exception
 // messages from becoming persistent logs, even if a caller passes extra keys.
-export const LOG_COMMANDS=new Set(['/start','/menu','/id','/help','/cancel','/otr','/boards','/retry','/refresh','/resend','/result','/search','/next','/adduser','/removeuser','/users','/admin','/log']);
+export const LOG_COMMANDS=new Set(['/start','/menu','/id','/help','/cancel','/otr','/boards','/retry','/refresh','/resend','/result','/search','/next','/adduser','/removeuser','/users','/admin','/log','/save','/dsave','/psave','/reuse']);
 const vocabulary={
-  event:new Set(['message','handled','denied','ignored','access_changed','session_expired','portal_started','portal_result','portal_error','bot_started','bot_ready','bot_stopped','system_error','log_viewed','log_exported']),
+  event:new Set(['message','handled','denied','ignored','access_changed','session_expired','portal_started','portal_result','portal_error','bot_started','bot_ready','bot_stopped','system_error','log_viewed','log_exported','session_saved','session_viewed','session_reused','save_failed']),
   module:new Set(['system','menu','otr-menu','password','otr','registration','none']),
   action:new Set([...LOG_COMMANDS,'answer','confirm','choose-password','choose-otr','choose-recovery','choose-registration','back','unknown-command','unsupported-message','open','submit','refresh','resend','grant','revoke','polling','webhook']),
-  phase:new Set(['none','menu','otr-menu','questions','captcha','preparing','prepare-failed','correction','submitting','done','unknown','loading','load-failed','confirm','unsupported','blocked']),
+  phase:new Set(['none','menu','otr-menu','questions','captcha','preparing','prepare-failed','correction','submitting','done','unknown','loading','load-failed','confirm','unsupported','blocked','save-required']),
   field:new Set(['applicationType','registration','dob','mobile','board','year','roll','captcha','otp','consent','aadhaar','gender','name','choice','otr','prefix','password','password-confirm']),
   result:new Set(['success','response-image','result-image','form','captcha','correction','unknown','unsupported','resend-unavailable','completed','changed','unchanged','failed']),
   reason:new Set(['access','admin-only','duplicate','unsupported-message','invalid-arguments','timeout','network','polling-conflict','storage','action','fields','page','dialog','external-verification','changed-form','changed-values','missing-field','refresh','otr-lookup','captcha','otp','already-registered','not-found','rate-limit','registration-mismatch']),

@@ -163,7 +163,7 @@ export class RegistrationPortal extends OtrPortal {
     // The protected receipt layout is not assumed. Deliver the official response
     // once, without asserting success or submitting a continuation form.
     if (this.externalBlocked || new URL(this.page.url()).origin !== OTR_ORIGIN) return {kind:'unsupported',reason:'external-verification'};
-    const image = await this.page.screenshot({type:'png',fullPage:true,mask:[this.page.locator('input[type=password],input[id*=txt_pwd]')]});
+    const image = await this.page.screenshot({type:'png',fullPage:true,mask:[this.page.locator('input[type=password],input[id*=txt_pwd], #ContentPlaceHolder1_txtCaptcha, #Captcha, input[autocomplete="one-time-code"], input[id*="otp" i], input[name*="otp" i]')]});
     return {kind:'result-image',image};
   }
 

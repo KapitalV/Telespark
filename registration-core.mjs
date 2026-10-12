@@ -1,5 +1,6 @@
 import {OtrBot} from './otr-core.mjs';
 import {BOARD_KEYBOARD,boardName} from './board-options.mjs';
+import {projectFields} from './saved-schema.mjs';
 
 export function normalizeRegistrationAnswer(field,text,password) {
   const value = field.id==='ContentPlaceHolder1_ddl_board' ? boardName(text) : text.trim();
@@ -28,10 +29,15 @@ export function normalizeRegistrationAnswer(field,text,password) {
 
 export class RegistrationBot extends OtrBot {
   constructor(options) { super(options); this.quietActions = true; }
-  async start(id) {
+  async start(id,reuseFields) {
     await this.clear(id);
     const state = {mode:'application',phase:'loading',values:{},updated:this.clock(),lastMessageId:-1};
     this.sessions.set(id,state);
+    if(reuseFields) {
+      state.reuseFields=projectFields('registration',reuseFields);
+      const password=state.reuseFields.ContentPlaceHolder1_txt_pwd;
+      if(password) state.reuseFields.ContentPlaceHolder1_txt_pwd_confirm={...password};
+    }
     await this.telegram.send(id,'Fresh scholarship registration using an existing OTR. District is fixed to Jalaun. I will ask for the remaining fields one at a time, then show a review before you type CONFIRM. This does not create a new OTR. /cancel clears the bot session.');
     return this.open(id,state);
   }
@@ -52,6 +58,23 @@ export class RegistrationBot extends OtrBot {
       return this.operation(id,state,()=>state.portal.submit({[step.fields[0].key]:choices[0].value},step.fingerprint));
     }
     if (step?.reason === 'otr-lookup') return this.stop(id,state,'blocked','The website did not open registration for that OTR. Check whether the OTR is valid or already registered for this session. Use /menu to return. No final registration was submitted.');
+    const field=step?.kind==='form' && step.fields[0];
+    const saved=field && state.reuseFields?.[field.id || field.key];
+    if(saved && field.type!=='captcha' && step.action.kind!=='register') {
+      delete state.reuseFields[field.id || field.key];
+      let value;
+      try {
+        if(field.options) {
+          const matches=field.options.filter(o=>o.value===saved.value && o.label===saved.label);
+          if(matches.length!==1) throw new Error('Option changed.');value=matches[0].value;
+        } else value=this.normalizeAnswer(field,field.type==='prefix' && saved.value===''?'NONE':saved.value,state);
+      } catch {
+        await this.telegram.send(id,'A saved field no longer matches the current portal. Choose or enter it again.');
+        return super.apply(id,state,step);
+      }
+      return this.operation(id,state,()=>state.portal.submit({[field.key]:value},step.fingerprint));
+    }
+    if(field?.type==='captcha') state.reuseFields=undefined;
     return super.apply(id,state,step);
   }
   async prompt(id,state) {
@@ -91,7 +114,8 @@ export class RegistrationBot extends OtrBot {
   }
   async confirmRegistration(id,state) {
     const summary=(state.step.review || []).join('\n');
-    const sent=await this.telegram.send(id,`Review the scholarship registration:\n${summary}\nPassword: entered and matched (hidden).\nType CONFIRM to submit once, or /cancel. Check the course, institution and details carefully.`,{protect_content:false});
+    const saveNote=this.saves?'\nBefore CONFIRM, use /save then /dsave to save this session.':'';
+    const sent=await this.telegram.send(id,`Review the scholarship registration:\n${summary}\nPassword: entered and matched (hidden).${saveNote}\nType CONFIRM to submit once, or /cancel. Check the course, institution and details carefully.`,{protect_content:false});
     state.promptId=sent.message_id;state.promptAt=this.clock();
   }
   async deliver(id,state) {

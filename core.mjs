@@ -92,11 +92,12 @@ export function parsePortalResult(url, text, expectedRegistration) {
 }
 
 export class RecoveryBot {
-  constructor({telegram, portalFactory, allowedUserId = '', canUse, clock = () => Date.now(), prepareTimeoutMs = 75_000, onDiagnostic = () => {}}) {
+  constructor({telegram, portalFactory, allowedUserId = '', canUse, saves, clock = () => Date.now(), prepareTimeoutMs = 75_000, onDiagnostic = () => {}}) {
     this.telegram = telegram;
     this.portalFactory = portalFactory;
     this.allowedUserId = String(allowedUserId);
     this.canUse = canUse;
+    this.saves = saves;
     this.clock = clock;
     this.sessions = new Map();
     this.prepareTimeoutMs = prepareTimeoutMs;
@@ -106,7 +107,7 @@ export class RecoveryBot {
   async clear(chatId) {
     const state = this.sessions.get(chatId);
     this.sessions.delete(chatId);
-    if (state) {state.details={}; state.result=undefined;}
+    if (state) {state.details={}; state.result=undefined;state.savedOutcomePending=undefined;}
     void state?.portal?.close().catch(() => {});
   }
 
@@ -150,6 +151,7 @@ export class RecoveryBot {
     if (command === '/refresh' && state.phase === 'captcha') return this.prepare(chatId, state);
     if (command === '/retry' && state.phase === 'prepare-failed') return this.prepare(chatId, state);
     if (state.phase === 'prepare-failed') return send('Your six answers are saved. Send /retry to load the form again, or /start to change the details.');
+    if (state.phase === 'save-required') return this.saves.prompt(chatId,'password');
     if (text.startsWith('/')) return send('Use /help for commands.');
     if (state.phase === 'questions' || state.phase === 'correction') {
       const field = state.phase === 'correction' ? state.correction : questionAt(state.index, state.details)[0];
@@ -162,6 +164,7 @@ export class RecoveryBot {
           return send(prompt,nextField==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);
         }
       }
+      if(this.saves) {state.phase='save-required';return this.saves.prompt(chatId,'password');}
       return this.prepare(chatId, state);
     }
     if (state.phase !== 'captcha') return send('Please wait while the request completes.');
@@ -177,10 +180,14 @@ export class RecoveryBot {
       return this.prepare(chatId, state);
     }
     // Never automatically repeat a recovery submission after a timeout or ambiguous response.
+    if(this.saves && !await this.saves.beforeSubmit(chatId,state,'password')) return;
+    if(this.sessions.get(chatId)!==state || !this.authorized(message.from.id)) return;
     state.phase = 'submitting';
     let result;
     try { result = await state.portal.submit(text); }
     catch { result = {kind:'unknown'}; }
+    if (this.sessions.get(chatId)!==state || !this.authorized(message.from.id)) return;
+    await this.saves?.outcome(chatId,state,'password',result);
     if (this.sessions.get(chatId)!==state || !this.authorized(message.from.id)) return;
     if (result.kind === 'success' || result.kind === 'response-image') {
       state.result = result;
@@ -207,6 +214,17 @@ export class RecoveryBot {
   }
 
   authorized(id) {return this.canUse ? this.canUse(id) : !!this.allowedUserId && String(id)===this.allowedUserId;}
+
+  async reuse(chatId,fields) {
+    await this.clear(chatId);
+    const state={phase:'questions',index:0,details:{},updated:this.clock(),lastMessageId:-1};this.sessions.set(chatId,state);
+    for(;state.index<QUESTIONS.length;state.index++) {
+      const [field,prompt]=questionAt(state.index,state.details);
+      try {state.details[field]=normalizeAnswer(field,fields[field]?.value ?? '');}
+      catch {return this.telegram.send(chatId,prompt,field==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);}
+    }
+    state.phase='save-required';return this.saves.prompt(chatId,'password');
+  }
 
   async prepare(chatId, state) {
     state.phase = 'preparing';

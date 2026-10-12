@@ -132,16 +132,20 @@ export class ScholarshipPortal {
 
   report(event) {try {this.onDiagnostic(event);} catch { /* Never interrupt recovery. */ }}
 
+  resultImage() {
+    return this.page.screenshot({fullPage:true,type:'png',mask:[this.page.locator('#ContentPlaceHolder1_txtCaptcha, #Captcha, input[autocomplete="one-time-code"], input[id*="otp" i], input[name*="otp" i]')]});
+  }
+
   async captureResult(result) {
     // A screenshot failure must not discard a verified recovered password or trigger a repeat.
     if (result.kind === 'success') {
-      try { result.slip = await this.page.screenshot({fullPage:true,type:'png'}); }
+      try { result.slip = await this.resultImage(); }
       catch { /* The verified text result is still usable. */ }
     }
     if (result.kind === 'unknown' && result.reason !== 'registration-mismatch' && new globalThis.URL(this.page.url()).origin === 'https://scholarship.up.gov.in') {
       try {
         const imageUrl=this.page.url();
-        let slip=await this.page.screenshot({fullPage:true,type:'png'});
+        let slip=await this.resultImage();
         // Rendering/screenshotting can finish after a late redirect. Re-read
         // before labelling the captured page as unconfirmed or closing it.
         const text=await this.page.locator('body').innerText();
@@ -153,7 +157,7 @@ export class ScholarshipPortal {
           this.report({event:'recovery-response-rechecked',kind:latest.kind});
           if (latest.kind === 'success') {
             if (imageUrl !== latestUrl) {
-              try {slip=await this.page.screenshot({fullPage:true,type:'png'});} catch {slip=undefined;}
+              try {slip=await this.resultImage();} catch {slip=undefined;}
             }
             latest.slip=slip;
           }

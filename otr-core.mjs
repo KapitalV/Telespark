@@ -21,8 +21,8 @@ const STOP_REASONS = {
 };
 
 export class OtrBot {
-  constructor({telegram, portalFactory, allowedUserId = '', canUse, clock = () => Date.now(), timeoutMs = 75_000}) {
-    Object.assign(this, {telegram, portalFactory, allowedUserId:String(allowedUserId), canUse, clock, timeoutMs});
+  constructor({telegram, portalFactory, allowedUserId = '', canUse, saves, clock = () => Date.now(), timeoutMs = 75_000}) {
+    Object.assign(this, {telegram, portalFactory, allowedUserId:String(allowedUserId), canUse, saves, clock, timeoutMs});
     this.sessions = new Map();
   }
 
@@ -32,6 +32,7 @@ export class OtrBot {
     if (state) {
       state.values = {};
       state.savedMobile = undefined;
+      state.reuseFields=undefined;state.savedOutcomePending=undefined;
       state.result = state.resultImage = state.step = undefined;
       const portal = state.portal;
       state.portal = undefined;
@@ -65,6 +66,7 @@ export class OtrBot {
       step = await Promise.race([fn(), new Promise((_, reject) => {timer = setTimeout(() => reject(new Error('OTR deadline')), this.timeoutMs);})]);
     } catch (error) {
       if (this.sessions.get(id) !== state) return;
+      if(state.savedAttemptPending) await this.saves.outcome(id,state,'registration',{kind:'unknown'});
       state.values = {};
       state.step = undefined;
       state.phase = submission ? 'unknown' : 'load-failed';
@@ -80,6 +82,8 @@ export class OtrBot {
       clearTimeout(timer);
       state.updated = this.clock();
     }
+    if (this.sessions.get(id) !== state) return;
+    if(state.savedAttemptPending) await this.saves.outcome(id,state,'registration',step);
     if (this.sessions.get(id) !== state) return;
     // Keep delivery failures separate from portal failures. Retain verified
     // results so /result can deliver without repeating a portal submission.
@@ -247,6 +251,8 @@ export class OtrBot {
       await this.telegram.send(id, 'The CAPTCHA expired while waiting. Refreshing this step without submitting.');
       return this.operation(id, state, () => state.portal.refresh(state.step.fingerprint));
     }
+    if(this.saves && state.step.action.kind==='register' && !await this.saves.beforeSubmit(id,state,'registration')) return;
+    if(this.sessions.get(id)!==state || !this.authorized(id)) return;
     const values = state.values;
     state.values = {};
     const fingerprint = state.step.fingerprint;

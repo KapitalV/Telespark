@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # Copy only program files: never bake .env or recovery results into the image.
-COPY --chown=pwuser:pwuser bot.mjs core.mjs portal.mjs webhook.mjs probe.mjs router.mjs otr-core.mjs otr-portal.mjs otr-schema.mjs otr-recovery.mjs otr-diagnostics.mjs registration-core.mjs registration-portal.mjs access.mjs board-options.mjs activity.mjs ./
+COPY --chown=pwuser:pwuser bot.mjs core.mjs portal.mjs webhook.mjs probe.mjs router.mjs otr-core.mjs otr-portal.mjs otr-schema.mjs otr-recovery.mjs otr-diagnostics.mjs registration-core.mjs registration-portal.mjs access.mjs board-options.mjs activity.mjs saved-schema.mjs saved-store.mjs saved-sessions.mjs ./
 RUN mkdir -p /app/data && chown pwuser:pwuser /app/data
 
 ENV NODE_ENV=production

@@ -5,6 +5,8 @@ node_modules
 test
 *.log
 *.jsonl
+*.enc
+*.key
 *.xlsx
 *.jpg
 *.png

@@ -13,6 +13,8 @@ import {RegistrationBot} from './registration-core.mjs';
 import {RegistrationPortal} from './registration-portal.mjs';
 import {AccessStore} from './access.mjs';
 import {ActivityLog,loggedPortal} from './activity.mjs';
+import {SavedStore} from './saved-store.mjs';
+import {SavedSessions} from './saved-sessions.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -69,7 +71,11 @@ try {
   await activity.init();
   if(!await activity.record({event:'bot_started',module:'system'})) throw new Error();
 } catch {console.error('Cannot initialize activity logs. Check ACTIVITY_LOG_DIR and its write permissions.');process.exit(1);}
-const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,
+const savedStore=new SavedStore({directory:process.env.SAVED_SESSIONS_DIR || undefined,keyFile:process.env.SAVED_SESSION_KEY_FILE || undefined});
+try {await savedStore.init();}
+catch {console.error('Cannot initialize encrypted saved sessions. Check storage permissions and restore the original key if records already exist.');process.exit(1);}
+const saves=new SavedSessions({store:savedStore,telegram,access,activity});
+const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,saves,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:userId => loggedPortal(new ScholarshipPortal({
   onDiagnostic:event => console.log(JSON.stringify(event)),
@@ -82,11 +88,11 @@ const otr = new OtrBot({telegram, allowedUserId:owner,canUse, portalFactory:(mod
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 }),activity,{userId,module:'otr'})});
-const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,portalFactory:userId=>loggedPortal(new RegistrationPortal({
+const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,saves,portalFactory:userId=>loggedPortal(new RegistrationPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 }),activity,{userId,module:'registration'})});
-const bot = new BotRouter({telegram, recovery, otr, registration, access, activity, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
+const bot = new BotRouter({telegram, recovery, otr, registration, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true'});
 // Expire sensitive in-memory sessions even when no webhook messages arrive.
 const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
 cleanupTimer.unref();

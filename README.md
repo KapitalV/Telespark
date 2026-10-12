@@ -80,11 +80,13 @@ Daily files are saved in `data/activity/YYYY-MM-DD.jsonl` and survive local rest
 
 The main menu tells users that activity is logged. Records include the Telegram user ID, timestamp, known command or action, module, input-field **type**, current stage, classified website result, access denial, admin grants/revocations, duplicate updates, expiry, delivery failures and bot lifecycle/network events. Requests are recorded before processing and their state afterwards; `handled` means the handler returned, not that the website accepted an answer. `portal_started / submit` records a portal method attempt, not proof of a completed website POST. A screenshot-only result stays unconfirmed. Force-killing the process cannot produce a clean shutdown record.
 
-Raw chat text, command arguments, applicant identifiers, names, mobile numbers, dates of birth, passwords, OTPs, CAPTCHA answers, images, portal HTML and raw exception messages are **not** stored. Authorized/admin Telegram IDs are stored for attribution. Both writes and exports accept only fixed event fields and classifications. Group chats are ignored. Logs start when this version runs; old Telegram conversations are not imported.
+Raw chat text, command arguments, applicant details, passwords, OTPs, CAPTCHA answers, images, portal HTML and raw exceptions are **not stored in activity logs**. Telegram IDs are stored for attribution. Logs contain fixed fields and classifications. Applicant records use the separate encrypted store described in [SAVED_SESSIONS.md](SAVED_SESSIONS.md). Group chats are ignored; old Telegram conversations are not imported.
 
 Dates in filenames and `/log` displays use IST; JSON timestamps use UTC. Writes are serialized and flushed to disk. If logging cannot initialize, startup stops with a clear configuration error. A later write failure is reported in the runtime console and `/log` warns that history may be incomplete; a logging failure never retries a website submission. Damaged records are skipped with a warning.
 
 ## 5. Recover your password
+
+Registration and recovery now require `/save` followed by `/dsave` or `/psave` before final submission. Saved details, passwords and result files survive restart in encrypted local storage. Only their owner can retrieve details; the admin dashboard shows all users' statuses. See [saved-session commands and key backup instructions](SAVED_SESSIONS.md).
 
 Send `/start` to your bot. It asks, in order:
 
@@ -95,7 +97,7 @@ Send `/start` to your bot. It asks, in order:
 5. Class 10 passing year as entered in your original application
 6. Class 10 roll number, preserving leading zeros
 
-The bot fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits the recovery request. There is no additional confirmation prompt in this user-operated program. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
+After six answers, open `/save` and select `/psave`. The bot then fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits recovery. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
 
 After success, the bot sends your latest password and a PNG recovery slip. If the official page is readable but its outcome is unrecognized, the bot sends a screenshot labelled as unconfirmed, so you can read the website's response. A result labelled with a different registration number is not delivered. Repeated recovery may generate a different password. Use `/result` to resend a saved result or response screenshot without submitting again. New text and images allow copying, saving, downloading and forwarding; previously protected messages keep their existing Telegram restrictions.
 
@@ -116,6 +118,9 @@ After success, the bot sends your latest password and a PNG recovery slip. If th
 | `/removeuser ID` | Admin: revoke access and clear that user's session |
 | `/users` | Admin: list allowed user IDs |
 | `/log` | Admin: recent activity, user filters and daily downloads |
+| `/save` | Saved-session dashboard |
+| `/dsave`, `/psave` | Save or retrieve registration / recovery details |
+| `/reuse SESSION_ID` | Load your saved fields into a fresh session |
 
 ## Running and handling errors
 
@@ -123,13 +128,13 @@ For local polling mode, keep this PowerShell process and your PC running with in
 
 An invalid CAPTCHA produces a new image while retaining the six details. A recognized mismatch requests only the affected field, such as Class 10 passing year. The response reader handles page navigation, in-place responses and validation alerts. After a navigation deadline it still checks the currently rendered official page. Unknown results stop further submission attempts because the password might already have changed. Check the response screenshot or official site before intentionally starting another recovery. Response diagnostics contain only a result category, an allowlisted page category, HTTP status and whether the click reported an error; they never include answers or passwords.
 
-CAPTCHA replies older than five minutes are not submitted. Idle sessions and completed results are removed from memory after twenty minutes. Restarting clears memory and skips old queued messages to avoid replaying CAPTCHA replies. Applicant details, passwords, and slips are not written to program logs or local storage; they do travel through Telegram and remain subject to Telegram's chat storage. The bot token remains in the local environment configuration; the authorized-user file stores access IDs only. Result messages can be copied or saved.
+CAPTCHA replies older than five minutes are not submitted. Idle sessions and results leave memory after twenty minutes. Restarting clears memory and skips old queued messages. Encrypted saved copies persist through cancellation, expiry and restart; applicant details, passwords and images stay excluded from program/activity logs. Telegram retains its own chat history. The bot token stays in environment configuration; access IDs stay in the authorized-user file. Result messages can be copied or saved.
 
 The bot supports authorized postmatric recovery and the fresh scholarship registration form described below. The website can change its fields, sessions, or verification flow. The bot does not decide scholarship eligibility.
 
 ## Validation
 
-After the sixth answer, the bot acknowledges receipt before opening the website. Form preparation has a 75-second deadline. If loading or CAPTCHA delivery fails, `/retry` reuses the answers for up to 20 minutes without submitting a recovery. Failure messages and logs contain only the failed stage and a safe error category, never Playwright's raw messages or filled values.
+After the sixth answer and required save, the bot acknowledges receipt before opening the website. Form preparation has a 75-second deadline. `/retry` reuses in-memory answers for up to 20 minutes if loading fails. After that, `/psave SESSION_ID` retrieves the encrypted copy and `/reuse SESSION_ID` starts a fresh flow. Failure logs contain only the stage and safe error category.
 
 For deployment diagnosis, temporarily set `PORTAL_STARTUP_CHECK=true`. Startup then fills the six fields with synthetic values and captures the CAPTCHA, logs `portal-probe`, and closes the browser. This check never submits a CAPTCHA or changes a password. Remove the flag after diagnosis to avoid extra startup browser work.
 

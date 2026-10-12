@@ -4,11 +4,12 @@ import {telegramUserId} from './access.mjs';
 
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, registration, access, activity, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, registration, access, activity, allowedUserId:String(allowedUserId), enableOtr, clock});
+  constructor({telegram, recovery, otr, registration, access, activity, saves, allowedUserId = '', enableOtr = false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, access, activity, saves, allowedUserId:String(allowedUserId), enableOtr, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
+    saves?.bind(this);
   }
 
   handle(message) {
@@ -42,7 +43,7 @@ export class BotRouter {
     await this.clear(id);
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
     const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR']];
-    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity is logged for the admin: user ID, actions and outcomes. Your answers, passwords, OTPs and images are excluded.', {
+    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity logs exclude your answers, passwords and images.'+(this.saves?'\nRegistration and password recovery require /save before submission. Saved fields, passwords and results are encrypted and remain available after restart. OTPs, CAPTCHA answers and cookies are never saved. /cancel clears only the active session.':''), {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
   }
@@ -99,16 +100,17 @@ export class BotRouter {
     }
     if (['/adduser','/removeuser','/users','/admin','/log'].includes(command)) return this.adminCommand(message,command);
     await this.expire();
+    if(['/save','/dsave','/psave','/reuse'].includes(command)) return this.saves?this.saves.handle(message,command):this.telegram.send(id,'Saved sessions are unavailable in this bot build.');
     if (command === '/cancel') {
       await this.clear(id);
-      return this.telegram.send(id, 'Cancelled. Details cleared. Send /start for the menu.');
+      return this.telegram.send(id, 'Cancelled. Active details cleared.'+(this.saves?' Encrypted saved copies remain available through /save.':'')+' Send /start for the menu.');
     }
     if (command === '/start' || command === '/menu') return this.menu(id);
     if (command === '/otr') {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this session\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — resend a saved result or screenshot\n/boards — password recovery boards\n/search words, /next — registration institution search\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history':''));
+    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result — resend the current result or screenshot\n/boards — password recovery boards\n/search words, /next — registration institution search\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();

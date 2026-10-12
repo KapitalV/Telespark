@@ -2,6 +2,13 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {ScholarshipPortal, portalFailure} from '../portal.mjs';
 
+test('Persistable response images mask CAPTCHA and OTP controls',async()=>{
+  const portal=new ScholarshipPortal();let options;
+  portal.page={locator:selector=>({selector}),screenshot:async opts=>{options=opts;return Buffer.from('image');}};
+  await portal.captureResult({kind:'success'});
+  assert.match(options.mask[0].selector,/txtCaptcha/);assert.match(options.mask[0].selector,/otp/);
+});
+
 test('Portal diagnostics keep the stage and network category, never raw personal values', () => {
   const error = portalFailure(new Error('net::ERR_CONNECTION_RESET secret-personal-value'), 'website');
   assert.equal(error.code,'ERR_CONNECTION_RESET');

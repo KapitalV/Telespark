@@ -5,6 +5,11 @@ import {RegistrationBot,normalizeRegistrationAnswer} from '../registration-core.
 import {RegistrationPortal,REGISTRATION_FIELDS} from '../registration-portal.mjs';
 import {BotRouter} from '../router.mjs';
 import {OTR_ORIGIN} from '../otr-schema.mjs';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {join,dirname,basename,resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {SavedStore} from '../saved-store.mjs';
+import {SavedSessions} from '../saved-sessions.mjs';
 
 test('Registration validates OTR, optional roll letters, leading zeros, exact years and matching passwords',()=>{
   assert.equal(normalizeRegistrationAnswer({type:'otr'},'up26-0000000001'),'UP26-0000000001');
@@ -22,10 +27,11 @@ test('Registration validates OTR, optional roll letters, leading zeros, exact ye
 function chat(portal,options={}) {
   let outgoing=100,incoming=1,now=Date.now();
   const sent=[];
-  const telegram={send:async (_id,text,opts)=>{sent.push({text,opts});return {message_id:outgoing++};},photo:async (_id,image,text,opts)=>{sent.push({text,image,opts});return {message_id:outgoing++};}};
-  const bot=new RegistrationBot({telegram,portalFactory:()=>portal,allowedUserId:'42',clock:()=>now,timeoutMs:10_000,...options});
+  const telegram={send:async (_id,text,opts)=>{sent.push({text,opts});return {message_id:outgoing++};},photo:async (_id,image,text,opts)=>{sent.push({text,image,opts});return {message_id:outgoing++};},document:async(_id,image,name,text)=>{sent.push({text,image,name});}};
+  const saves=options.store?new SavedSessions({store:options.store,telegram,access:{canUse:id=>String(id)==='42',isAdmin:id=>String(id)==='42'},clock:()=>now}):undefined;
+  const bot=new RegistrationBot({telegram,portalFactory:()=>portal,allowedUserId:'42',clock:()=>now,timeoutMs:10_000,saves,...options});
   const dummy={clear:async()=>{},expire:async()=>{},start:async()=>{throw Error('Wrong module');}};
-  const router=new BotRouter({telegram,registration:bot,otr:dummy,recovery:dummy,allowedUserId:'42',enableOtr:true,clock:()=>now});
+  const router=new BotRouter({telegram,registration:bot,otr:dummy,recovery:dummy,saves,allowedUserId:'42',enableOtr:true,clock:()=>now});
   const message=(text,extra={})=>({message_id:incoming++,from:{id:42},chat:{id:42,type:'private'},text,...extra});
   return {bot,router,sent,telegram,message,say:(text,extra)=>router.handle(message(text,extra)),advance:ms=>{now+=ms;}};
 }
@@ -42,6 +48,21 @@ test('Jalaun selection uses the live value and stops if missing or repeatedly di
     assert.match(f.sent.at(-1).text,/did not offer or retain Jalaun/);
     assert.deepEqual(submitted,available?[{district:'live-jalaun'},{district:'live-jalaun'}]:[]);
   }
+});
+
+async function savedStore(t) {
+  const root=await mkdtemp(join(tmpdir(),'telespark-registration-save-test-'));
+  t.after(async()=>{assert.equal(dirname(resolve(root)),resolve(tmpdir()));assert.ok(basename(root).startsWith('telespark-registration-save-test-'));await rm(root,{recursive:true,force:true});});
+  const store=new SavedStore({directory:join(root,'records'),keyFile:join(root,'key')});await store.init();return store;
+}
+
+test('Registration timeout durably records an uncertain outcome and cannot be resubmitted',async t=>{
+  const store=await savedStore(t);let submits=0;
+  const portal={answers:new Map([['ContentPlaceHolder1_txt_pwd',{value:'Example1@'}]]),open:async()=>({kind:'form',fields:[{key:'captcha',type:'captcha'}],action:{kind:'register'},fingerprint:'f',image:Buffer.from('image'),review:['Synthetic student']}),submit:async()=>{submits++;await new Promise(()=>{});},close:async()=>{portal.answers.clear();}};
+  const f=chat(portal,{store,timeoutMs:25});
+  for(const answer of ['/start','2','2','AbC12','/save','/dsave','CONFIRM']) await f.say(answer);
+  const state=f.bot.sessions.get(42);assert.equal(state.phase,'unknown');assert.equal((await store.get(state.savedId,42)).status,'uncertain');
+  await f.say('CONFIRM');await f.say('/dsave');assert.equal(submits,1);
 });
 
 test('Registration timeouts do not retry submission and clear in-memory passwords',async()=>{
@@ -164,5 +185,39 @@ test('Registration browser workflow with observed controls (network fully interc
     const fs=await fixture({failFinal:true});const f=chat(fs.portal);
     await untilCaptcha(f);await f.say('AbC12');await f.say('CONFIRM');await f.say('CONFIRM');
     assert.equal(f.bot.sessions.get(42).phase,'unknown');assert.equal(fs.posts.filter(p=>p.has('final')).length,1);
+  });
+  await t.test('Save before CONFIRM, persist receipt, retrieve after cancellation and reuse against fresh live options',async st=>{
+    const store=await savedStore(st),fs=await fixture(),f=chat(fs.portal,{store});
+    await untilCaptcha(f);await f.say('AbC12');await f.say('CONFIRM');
+    assert.equal(fs.posts.filter(p=>p.has('final')).length,0);assert.match(f.sent.at(-1).text,/Save the current details/);
+    await f.say('/dsave');assert.match(f.sent.at(-1).text,/Open \/save first/);
+    await f.say('/save');await f.say('/dsave');
+    const id=f.bot.sessions.get(42).savedId,ready=await store.get(id,42);
+    const screenshot=fs.portal.page.screenshot.bind(fs.portal.page);
+    fs.portal.page.screenshot=options=>{assert.match(options.mask[0].toString(),/txtCaptcha/);assert.match(options.mask[0].toString(),/otp/);return screenshot(options);};
+    assert.equal(ready.status,'ready');assert.equal(ready.fields[p+'txt_pwd'].value,'Example1@');
+    assert.equal(ready.fields[p+'ddl_institute'].label,'College 42');assert.equal(ready.fields[p+'ddl_district'].label,'Jalaun');
+    assert.equal(ready.fields.studentName.value,'TEST STUDENT');assert.equal(ready.fields.linkedMobile.value,'9876543210');
+    assert.equal(ready.fields[p+'txtCaptcha'],undefined);assert.equal(ready.fields[p+'txt_pwd_confirm'],undefined);
+    const confirm=f.message('CONFIRM');await Promise.all([f.router.handle(confirm),f.router.handle(confirm)]);
+    assert.equal(fs.posts.filter(p=>p.has('final')).length,1);
+    const result=await store.get(id,42);assert.equal(result.status,'uncertain');assert.ok(result.result.image);
+    await f.say('/cancel');await f.say(`/dsave ${id}`);assert.ok(f.sent.some(m=>m.name===`${id}.png`));
+    const reused=await fixture();f.bot.portalFactory=()=>reused.portal;
+    await f.say(`/reuse ${id}`);
+    assert.equal(f.bot.sessions.get(42).step.fields[0].type,'captcha');
+    assert.equal(reused.portal.answers.get(p+'txt_pwd').value,'Example1@');
+    assert.equal(reused.portal.answers.get(p+'txt_hghrollno').value,'000012345');
+    assert.equal(reused.posts.filter(p=>p.has('final')).length,0);
+    await f.say('AbC12');await f.say('CONFIRM');assert.equal(reused.posts.filter(p=>p.has('final')).length,0);
+    await f.say('/save');await f.say('/dsave');assert.notEqual(f.bot.sessions.get(42).savedId,id);
+    await f.say('/cancel');
+    const changed={...ready.fields,[p+'ddl_institute']:{value:'42',label:'Different college'}};
+    const draft=await store.save({userId:42,module:'registration',fields:changed});
+    const changedPortal=await fixture();f.bot.portalFactory=()=>changedPortal.portal;
+    await f.say(`/reuse ${draft.id}`);
+    assert.equal(f.bot.sessions.get(42).step.fields[0].id,p+'ddl_institute');
+    assert.equal(changedPortal.posts.filter(p=>p.has('final')).length,0);
+    await f.say('/cancel');
   });
 });
