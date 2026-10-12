@@ -99,6 +99,19 @@ export class BotRouter {
       return this.telegram.send(id, 'Access is restricted. Send /id and ask the admin to add that user ID.');
     }
     if (['/adduser','/removeuser','/users','/admin','/log'].includes(command)) return this.adminCommand(message,command);
+    if (command === '/test') {
+      const valid=text.split(/\s+/).length===1;
+      await this.activity?.record({event:valid?'handled':'system_error',module:'system',action:'/test',userId:message.from.id,httpStatus:valid?200:400,...(valid?{}:{reason:'invalid-arguments'})});
+      if(!valid) {
+        const now=this.clock();
+        if(now-(this.lastTestAlert??-Infinity)>=60_000) {
+          this.lastTestAlert=now;
+          const admin=this.access?.adminId||this.allowedUserId;
+          if(admin) await this.telegram.send(admin,'Malformed /test request rejected. No portal action was performed. See /log.').catch(()=>{});
+        }
+      }
+      return this.telegram.send(id,JSON.stringify(valid?{ok:true,status:'200 OK',service:'OTNew-Poly',enabled:this.enablePoly,portalVerified:false,message:'Bot is responding. This test does not submit or verify a portal application.'}:{ok:false,error:{code:'INVALID_TEST_REQUEST',message:'Send /test without arguments.'}}));
+    }
     if(command==='/result'&&/^F-[a-f0-9]{32}$/.test(text.split(/\s+/)[1]||'')) {
       try {return await this.poly.storedResult(id,text.split(/\s+/)[1]);} catch {return this.telegram.send(id,'Saved PDF unavailable. Check the session ID and owner.');}
     }
@@ -113,7 +126,7 @@ export class BotRouter {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
+    if (command === '/help') return this.telegram.send(id, '/test — bot receipt check (does not submit to portal)\n/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();

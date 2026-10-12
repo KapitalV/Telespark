@@ -132,3 +132,25 @@ The automatic form → certificate verification → PDF delivery update also pas
 the full suite: 134 tests, zero failures and zero skips. New coverage checks
 automatic continuation, already-verified certificates, two-user document
 isolation and PDF failures without repeating certificate verification.
+
+## Operational receipt checks
+
+Authorized users can send `/test` without arguments. It returns a structured
+`200 OK` acknowledgement and writes metadata to `/log`. This proves the bot
+responds; `portalVerified: false` explicitly distinguishes this from a completed
+portal transaction. Malformed `/test` arguments return `INVALID_TEST_REQUEST`
+and flag the admin, limited to one alert per minute. Submitted values are omitted.
+
+Authenticated webhook requests return JSON acknowledgements; invalid JSON,
+invalid message envelopes and oversized bodies return structured 400/413 errors
+and alert the admin. Unauthorized requests never reach portal processing.
+Duplicate update IDs in the current process are acknowledged and ignored; the
+webhook retains the latest 2,000 IDs, and the router also rejects repeated/older
+message IDs per chat. Restarting clears the in-memory history and active sessions;
+polling startup intentionally discards pending old replies. This is not a durable
+exactly-once transaction system. An uncertain portal submission still stops for
+status inspection instead of automatic resubmission.
+
+Local live testing may be enabled at the owner's request. This does not mark the
+real applicant PDF acceptance checks above as passed. Keep unknown portal branches
+unsupported and use Download check-print PDF for a completed application.

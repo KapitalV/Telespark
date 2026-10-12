@@ -67,3 +67,17 @@ test('Oversized requests cannot fill the update queue', async t => {
   assert.equal((await f.post(JSON.stringify({update_id:1,text:'x'.repeat(140 * 1024)}))).status,413);
   assert.deepEqual(f.events,[]);
 });
+
+test('Receipts log duplicate status and malformed requests return safe errors and flag admin callback',async t=>{
+  const receipts=[], rejected=[];
+  const f=await fixture(t,{onReceipt:value=>receipts.push(value),onMalformed:value=>rejected.push(value)});
+  const first=await (await f.post({update_id:20})).json();
+  assert.equal(first.status,'200 OK');assert.equal(first.duplicate,false);assert.equal(first.processed,false);
+  const repeated=await (await f.post({update_id:20})).json();assert.equal(repeated.duplicate,true);
+  const bad=await f.post({update_id:21,message:{text:'private data'}});
+  assert.equal(bad.status,400);const body=await bad.json();assert.equal(body.error.code,'INVALID_MESSAGE');
+  assert.ok(!JSON.stringify(body).includes('private data'));
+  await delay(10);
+  assert.deepEqual(f.events,[20]);assert.deepEqual(receipts,[{httpStatus:200,duplicate:false},{httpStatus:200,duplicate:true}]);
+  assert.deepEqual(rejected,[{code:'INVALID_MESSAGE',httpStatus:400}]);
+});

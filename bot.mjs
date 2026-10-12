@@ -96,6 +96,15 @@ const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,sa
 }),activity,{userId,module:'registration'})});
 const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:()=>new PolyPortal({headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
 const bot = new BotRouter({telegram, recovery, otr, registration, poly, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true'});
+let lastMalformedAlert = -Infinity;
+async function reportMalformed({httpStatus=400}={}) {
+  await activity.record({event:'system_error',module:'system',action:'webhook',reason:'invalid-arguments',httpStatus});
+  // Report metadata only, and avoid flooding the admin during repeated bad requests.
+  if (owner && Date.now()-lastMalformedAlert >= 60_000) {
+    lastMalformedAlert=Date.now();
+    await telegram.send(owner,'Request rejected: malformed bot payload. No portal action was performed. Check /log for details.').catch(()=>{});
+  }
+}
 // Expire sensitive in-memory sessions even when no webhook messages arrive.
 const cleanupTimer = setInterval(() => { void bot.expire().catch(() => {}); }, 60_000);
 cleanupTimer.unref();
@@ -127,6 +136,8 @@ try {
       secret,
       isReady:() => ready,
       onUpdate:async update => { await bot.handle(update.message); },
+      onReceipt:({httpStatus,duplicate}) => activity.record({event:duplicate?'ignored':'message',module:'system',action:'webhook',httpStatus,...(duplicate?{reason:'duplicate'}:{})}),
+      onMalformed:reportMalformed,
       onError:() => {console.error('Message delivery or processing failed. No automatic recovery resubmission was made.');void activity.record({event:'system_error',module:'system',action:'webhook',result:'failed'});},
     }));
     await new Promise((resolve,reject) => {
