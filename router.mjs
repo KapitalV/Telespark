@@ -43,7 +43,7 @@ export class BotRouter {
     await this.clear(id);
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
     const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR'],['3. Form filling OTNew-Poly']];
-    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity logs exclude your answers, passwords and images.'+(this.saves?'\nRegistration and password recovery require /save before submission. Saved fields, passwords and results are encrypted and remain available after restart. OTPs, CAPTCHA answers and cookies are never saved. /cancel clears only the active session.':''), {
+    return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity logs exclude your answers, passwords and images.'+(this.saves?'\nDetails are saved automatically before submission. /save lists saved sessions; /dsave and /psave are optional. Saved fields, passwords and results are encrypted and remain available after restart. OTPs, CAPTCHA answers and cookies are never saved. /cancel clears only the active session.':''), {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
   }
@@ -77,7 +77,7 @@ export class BotRouter {
     if(before.module==='otr-menu' && /^1(?:\.|$)/.test(text)) action='choose-recovery';
     if(before.module==='otr-menu' && /^2(?:\.|$)/.test(text)) action='choose-registration';
     if(before.module==='otr-menu' && /^back$/i.test(text)) action='back';
-    if(before.phase==='confirm' && /^confirm$/i.test(text)) action='confirm';
+    if(before.phase==='confirm' && /^(yes|confirm)$/i.test(text)) action='confirm';
     await this.activity?.record({event:'message',userId,messageId,action,...before});
     try {
       const result=await this.dispatch(message);
@@ -112,7 +112,7 @@ export class BotRouter {
       }
       return this.telegram.send(id,JSON.stringify(valid?{ok:true,status:'200 OK',service:'OTNew-Poly',enabled:this.enablePoly,portalVerified:false,message:'Bot is responding. This test does not submit or verify a portal application.'}:{ok:false,error:{code:'INVALID_TEST_REQUEST',message:'Send /test without arguments.'}}));
     }
-    if(command==='/result'&&/^F-[a-f0-9]{32}$/.test(text.split(/\s+/)[1]||'')) {
+    if(command==='/result'&&/^(?:D[0-9]{4}|F-[a-f0-9]{32})$/.test(text.split(/\s+/)[1]||'')) {
       try {return await this.poly.storedResult(id,text.split(/\s+/)[1]);} catch {return this.telegram.send(id,'Saved PDF unavailable. Check the session ID and owner.');}
     }
     await this.expire();

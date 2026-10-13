@@ -38,7 +38,7 @@ export class RegistrationBot extends OtrBot {
       const password=state.reuseFields.ContentPlaceHolder1_txt_pwd;
       if(password) state.reuseFields.ContentPlaceHolder1_txt_pwd_confirm={...password};
     }
-    await this.telegram.send(id,'Fresh scholarship registration using an existing OTR. District is fixed to Jalaun. I will ask for the remaining fields one at a time, then show a review before you type CONFIRM. This does not create a new OTR. /cancel clears the bot session.');
+    await this.telegram.send(id,'Fresh scholarship registration using an existing OTR. District is fixed to Jalaun. I will ask for the remaining fields one at a time, then show a review before you type YES. This does not create a new OTR. /cancel clears the bot session.');
     return this.open(id,state);
   }
   async open(id,state) {
@@ -114,8 +114,8 @@ export class RegistrationBot extends OtrBot {
   }
   async confirmRegistration(id,state) {
     const summary=(state.step.review || []).join('\n');
-    const saveNote=this.saves?'\nBefore CONFIRM, use /save then /dsave to save this session.':'';
-    const sent=await this.telegram.send(id,`Review the scholarship registration:\n${summary}\nPassword: entered and matched (hidden).${saveNote}\nType CONFIRM to submit once, or /cancel. Check the course, institution and details carefully.`,{protect_content:false});
+    const saveNote=this.saves?'\nAn encrypted copy is saved automatically when you submit. /dsave is optional.':'';
+    const sent=await this.telegram.send(id,`Review the scholarship registration:\n${summary}\nPassword: entered and matched (hidden).${saveNote}\nType YES to submit once, or /cancel. Check the course, institution and details carefully.`,{protect_content:false,reply_markup:{keyboard:[['YES'],['/cancel']],resize_keyboard:true,one_time_keyboard:true}});
     state.promptId=sent.message_id;state.promptAt=this.clock();
   }
   async deliver(id,state) {

@@ -59,7 +59,8 @@ test('Menu is gated; authorized private users only; cancel and expiry close brow
 test('Every section saves before submission; duplicate messages cannot post twice; secrets never saved/logged',async t=>{
   const f=await fixture(t);await f.login();const s=f.poly.sessions.get(99);
   assert.equal(s.credentials.password,undefined);assert.equal(s.phase,'confirm');const recordId=s.savedId;
-  await f.say('CONFIRM');const message=f.message('CaPt1');await Promise.all([f.router.handle(message),f.router.handle(message)]);
+  assert.equal(recordId,'D0001');
+  await f.say('YES');const message=f.message('CaPt1');await Promise.all([f.router.handle(message),f.router.handle(message)]);
   assert.equal(f.counts().submits,1);assert.equal((await f.store.get(recordId,99)).status,'confirmed');
   const raw=await readFile(join(f.root,'records',recordId+'.enc'),'utf8');assert.doesNotMatch(raw,/11010|000012345678|TemporarySecret/);
   assert.doesNotMatch(JSON.stringify(f.events),/TemporarySecret|CaPt1|AbC12|000012345678|UP26-/);

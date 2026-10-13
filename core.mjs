@@ -151,7 +151,7 @@ export class RecoveryBot {
     if (command === '/refresh' && state.phase === 'captcha') return this.prepare(chatId, state);
     if (command === '/retry' && state.phase === 'prepare-failed') return this.prepare(chatId, state);
     if (state.phase === 'prepare-failed') return send('Your six answers are saved. Send /retry to load the form again, or /start to change the details.');
-    if (state.phase === 'save-required') return this.saves.prompt(chatId,'password');
+    if (state.phase === 'save-required') return this.prepare(chatId,state);
     if (text.startsWith('/')) return send('Use /help for commands.');
     if (state.phase === 'questions' || state.phase === 'correction') {
       const field = state.phase === 'correction' ? state.correction : questionAt(state.index, state.details)[0];
@@ -164,7 +164,6 @@ export class RecoveryBot {
           return send(prompt,nextField==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);
         }
       }
-      if(this.saves) {state.phase='save-required';return this.saves.prompt(chatId,'password');}
       return this.prepare(chatId, state);
     }
     if (state.phase !== 'captcha') return send('Please wait while the request completes.');
@@ -223,7 +222,7 @@ export class RecoveryBot {
       try {state.details[field]=normalizeAnswer(field,fields[field]?.value ?? '');}
       catch {return this.telegram.send(chatId,prompt,field==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);}
     }
-    state.phase='save-required';return this.saves.prompt(chatId,'password');
+    return this.prepare(chatId,state);
   }
 
   async prepare(chatId, state) {

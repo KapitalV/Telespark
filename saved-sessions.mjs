@@ -1,6 +1,7 @@
 import {PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
 import {questionAt,normalizeAnswer} from './core.mjs';
 import {POLY_FIELDS} from './poly-schema.mjs';
+import {savedIdPattern} from './saved-store.mjs';
 
 const dateFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',dateStyle:'short',timeStyle:'short',hour12:false});
 const commandFor=module=>module==='password'?'/psave':module==='poly'?'/save':'/dsave';
@@ -37,7 +38,7 @@ export class SavedSessions {
     try {for(let i=0;i<6;i++) {const [key]=questionAt(i,state.details);normalizeAnswer(key,state.details[key] ?? '');}return true;} catch {return false;}
   }
   async prompt(id,module) {
-    return this.telegram.send(id,`Details are ready. Before submitting, open /save and choose ${commandFor(module)} to save an encrypted copy. Saving includes passwords and results; OTPs, CAPTCHA answers and cookies are excluded.`,{reply_markup:{keyboard:[['/save']],resize_keyboard:true,one_time_keyboard:true}});
+    return this.telegram.send(id,`Details are saved automatically before submission. ${commandFor(module)} optionally saves a draft; /save lists your records. OTPs, CAPTCHA answers and cookies are excluded.`);
   }
   async dashboard(id,args=[]) {
     if(this.router.sessions.get(id)?.module==='poly') await this.router.poly?.checkpoint(id,{ready:this.router.poly.sessions.get(id)?.phase==='confirm'});
@@ -57,7 +58,12 @@ export class SavedSessions {
   async handle(message,command) {
     const id=message.chat.id,args=message.text.trim().split(/\s+/).slice(1);
     try {
-      if(command==='/save') return args.length===1&&args[0].startsWith('F-')?await this.show(id,args[0],'poly'):await this.dashboard(id,args);
+      if(command==='/save') {
+        if(args.length===1&&savedIdPattern.test(args[0])) {
+          const record=await this.store.get(args[0],id);return await this.show(id,args[0],record.module);
+        }
+        return await this.dashboard(id,args);
+      }
       if(command==='/reuse') {
         if(args.length!==1) return this.telegram.send(id,'Use /reuse SESSION_ID to start a fresh session from your saved fields.');
         return await this.reuse(id,args[0]);
@@ -74,7 +80,6 @@ export class SavedSessions {
       if(!state || ['done','unknown','blocked','unsupported','load-failed'].includes(state.phase)) {
         return state?.savedId?await this.show(id,state.savedId,module):await this.list(id,module,1);
       }
-      if(!state.saveMenuOpened) return this.telegram.send(id,`Open /save first, then choose ${command}. Your current form stays open.`);
       if(module==='registration' && !state.portal) return this.telegram.send(id,'No registration fields are loaded yet. Return to the registration flow first.');
       const fields=this.fields(module,state),ready=this.ready(module,state);
       const record=await this.store.save({id:state.savedId,userId:id,module,fields,ready});
@@ -94,7 +99,7 @@ export class SavedSessions {
     const list=await this.store.list({userId:id,module,page});
     await this.sendLines(id,[`${module==='password'?'Password recovery':'Registration'} records — page ${page}`,
       ...list.records.map(r=>`${commandFor(module)} ${r.id}\n${SAVE_STATUS[r.status]} | ${dateFormat.format(new Date(r.updatedAt))} IST`),
-      ...(list.total?[]:['No saved records. Complete a form, open /save, then save it.']),
+      ...(list.total?[]:['No saved records. Details are saved automatically before submission; you can also save a draft.']),
       `Total: ${list.total}. ${commandFor(module)} list ${page+1} shows the next page.`]);
   }
   async show(id,sessionId,module) {
@@ -104,7 +109,7 @@ export class SavedSessions {
       ...Object.entries(record.fields).map(([key,field])=>`${labels[key]}: ${(field.label ?? field.value) || '(none)'}`)];
     if(record.result?.password) lines.push(`Latest recovered password: ${record.result.password}`);
     if(['attempted','uncertain'].includes(record.status)) lines.push('The website outcome is not confirmed. Check the official portal before considering another submission.');
-    lines.push(`Viewing this record does not contact the website. /reuse ${record.id} loads its fields into a fresh session; new verification and saving are required.`);
+    lines.push(`Viewing this record does not contact the website. /reuse ${record.id} loads its fields into a fresh session; fresh verification is required; saving is automatic.`);
     await this.sendLines(id,lines);
     if(!this.access.canUse(id)) return;
     if(record.result?.kind==='pdf') await this.router.poly.storedResult(id,sessionId);
@@ -114,11 +119,15 @@ export class SavedSessions {
   }
   async beforeSubmit(id,state,module) {
     try {
-      if(!state.savedId || !state.saveMenuOpened) throw new Error('Save first.');
+      const previousId=state.savedId;
+      const record=await this.store.save({id:state.savedId,userId:id,module,fields:this.fields(module,state),ready:true});
+      state.savedId=record.id;
+      await this.log(id,'session_saved',module);
+      if(!previousId) await this.telegram.send(id,`Saved automatically: ${record.id}. Retrieve later with ${commandFor(module)} ${record.id}.`);
       await this.store.begin(state.savedId,id,this.fields(module,state));state.savedAttemptPending=true;return true;
     } catch {
       await this.log(id,'save_failed',module);
-      await this.telegram.send(id,`No final request was submitted. Save the current details with /save then ${commandFor(module)} before submitting. An attempted/uncertain saved record cannot be submitted again automatically.`);return false;
+      await this.telegram.send(id,'No final request was submitted. Automatic encrypted saving failed or this record has already been attempted. Check storage or the saved status before retrying. An attempted/uncertain record cannot be submitted again automatically.');return false;
     }
   }
   async outcome(id,state,module,result) {
@@ -146,7 +155,7 @@ export class SavedSessions {
     await this.router.clear(id);
     if(!this.access.canUse(id)) return;
     this.router.sessions.set(id,{module:record.module,updated:this.clock()});
-    await this.telegram.send(id,`Reusing fields from ${record.id} (${SAVE_STATUS[record.status]}). This creates a new session. Previously submitted or uncertain records are never replayed automatically. Review the live details and complete a new save/verification before submission.`);
+    await this.telegram.send(id,`Reusing fields from ${record.id} (${SAVE_STATUS[record.status]}). This creates a new session. Previously submitted or uncertain records are never replayed automatically. Review the live details and complete fresh verification before submission. Saving is automatic.`);
     await this.log(id,'session_reused',record.module);
     if(record.module==='password') return this.router.recovery.reuse(id,record.fields);
     if(record.module==='poly') return this.router.poly.start(id,record.fields);

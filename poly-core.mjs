@@ -58,7 +58,7 @@ export class PolyBot {
       s.phase='confirm';await this.checkpoint(id,{ready:true});
       const rows=step.review||[];await this.lines(id,[`Review ${step.stage}:`,...rows]);
       if(step.declaration) await this.lines(id,['Official declaration:',step.declaration]);
-      return this.say(id,'Send CONFIRM to approve these details'+(step.declaration?' and accept the declaration':'')+'. I will then ask the current CAPTCHA.\nUse /edit to correct this section.',keyboard([['CONFIRM'],['/edit','/cancel']]));
+      return this.say(id,'Send YES to approve these details'+(step.declaration?' and accept the declaration':'')+'. I will then ask the current CAPTCHA. Details are saved automatically.\nUse /edit to correct this section.',keyboard([['YES'],['/edit','/cancel']]));
     }
     if(step.kind==='record') {
       s.phase='record';await this.checkpoint(id,{ready:true});await this.lines(id,['Retrieved '+step.stage+' certificate:',step.record]);
@@ -187,7 +187,7 @@ export class PolyBot {
         const fields=POLY_SECTIONS[s.step.stage].fields.filter(f=>!f.computed);s.editFields=fields;s.phase='edit';return await this.lines(id,['Choose the field number to correct:',...fields.map((f,i)=>`${i+1}. ${f.label}`)]);
       }
       if(s.phase==='edit') {const f=s.editFields[Number(text)-1];if(!f) return await this.say(id,'Enter a field number from the list.');return await this.prompt(id,s,await this.call(s,'edit',f.key));}
-      if(s.phase==='confirm'&&text.toUpperCase()==='CONFIRM') {s.phase='captcha';return await this.showCaptcha(id,s);}
+      if(s.phase==='confirm'&&['YES','CONFIRM'].includes(text.toUpperCase())) {s.phase='captcha';return await this.showCaptcha(id,s);}
       if(s.phase==='record') {
         if(text.toUpperCase()==='MISMATCH') return await this.prompt(id,s,{kind:'unsupported',message:'Certificate mismatch reported. Verification stopped. Check the certificate and application on the portal.'});
         if(text.toUpperCase()==='MATCH') return await this.attempt(id,s,undefined,true);

@@ -27,7 +27,7 @@ CAPTCHA, then creates a separate authenticated browser session. Credentials from
 the development conversation are never embedded in source or fixtures.
 
 Each supported application section asks its mapped fields, displays a review and
-the official declaration, requires `CONFIRM`, and then requests the CAPTCHA.
+the official declaration, requires `YES`, and then requests the CAPTCHA.
 `/edit` reopens a field and its subsequent dependent questions. `/search words`
 and `/next` work on live dropdown options. `USE DEFAULT` and `USE SAVED` are
 explicit choices; saved dropdown values must still be available in the portal.
@@ -68,9 +68,9 @@ and financial details have no applicant-specific defaults.
 ## Saving and documents
 
 Details are stored using the existing AES-256-GCM store and key. OTNew-Poly IDs
-start with `F-`. `/save` checkpoints current answers and lists section/status
-records; `/save F-...` retrieves the user's record. `/reuse F-...` opens a fresh
-session with selectable saved answers. `/result F-...` sends a saved PDF without
+use `D0001`, `D0002`, and so on. Existing `F-...` IDs still work. `/save` checkpoints current answers and lists section/status
+records; `/save D0001` retrieves the user's record. `/reuse D0001` opens a fresh
+session with selectable saved answers. `/result D0001` sends a saved PDF without
 logging in or posting a form. Administrators can list status metadata but cannot
 retrieve another user's private details or PDF.
 

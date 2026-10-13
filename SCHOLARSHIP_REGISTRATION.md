@@ -17,7 +17,7 @@ Fresh **Postmatric Other Than Intermediate**, studying in Uttar Pradesh
 - High-school passing year and **UP BOARD** / **CBSE BOARD** reply buttons. Typed `CBSC` is accepted as an alias for CBSE.
 - Optional roll-number letter prefix (`NONE` if absent), then numeric roll number.
 - Password and matching confirmation, followed by the current CAPTCHA image.
-- Review → `/save` → `/dsave` → literal `CONFIRM` → a single submission → official response screenshot.
+- Review → `YES` → automatic encrypted save → a single submission → official response screenshot. `/dsave` is optional and works without opening `/save`.
 
 The bot does not choose eligibility, caste, religion, or institution for the applicant.
 Prematric, classes 11–12, other-state applications and renewal forms are not

@@ -86,7 +86,7 @@ Dates in filenames and `/log` displays use IST; JSON timestamps use UTC. Writes 
 
 ## 5. Recover your password
 
-Registration and recovery now require `/save` followed by `/dsave` or `/psave` before final submission. Saved details, passwords and result files survive restart in encrypted local storage. Only their owner can retrieve details; the admin dashboard shows all users' statuses. See [saved-session commands and key backup instructions](SAVED_SESSIONS.md).
+Registration and recovery save automatically before final submission. `/save`, `/dsave` and `/psave` remain available but are optional. New saved IDs are sequential: R0001 (registration), D0001 (form filling), P0001 (password recovery). Saved details, passwords and result files survive restart in encrypted local storage. Only their owner can retrieve details; the admin dashboard shows all users' statuses. See [saved-session commands and key backup instructions](SAVED_SESSIONS.md).
 
 Send `/start` to your bot. It asks, in order:
 
@@ -134,7 +134,7 @@ The bot supports authorized postmatric recovery and the fresh scholarship regist
 
 ## Validation
 
-After the sixth answer and required save, the bot acknowledges receipt before opening the website. Form preparation has a 75-second deadline. `/retry` reuses in-memory answers for up to 20 minutes if loading fails. After that, `/psave SESSION_ID` retrieves the encrypted copy and `/reuse SESSION_ID` starts a fresh flow. Failure logs contain only the stage and safe error category.
+After the sixth answer, the bot acknowledges receipt before opening the website. Form preparation has a 75-second deadline. `/retry` reuses in-memory answers for up to 20 minutes if loading fails. If an encrypted copy was saved manually or before submission, `/psave SESSION_ID` retrieves it and `/reuse SESSION_ID` starts a fresh flow. Failure logs contain only the stage and safe error category.
 
 For deployment diagnosis, temporarily set `PORTAL_STARTUP_CHECK=true`. Startup then fills the six fields with synthetic values and captures the CAPTCHA, logs `portal-probe`, and closes the browser. This check never submits a CAPTCHA or changes a password. Remove the flag after diagnosis to avoid extra startup browser work.
 
@@ -166,7 +166,7 @@ The OTR handler asks for fields from the current official form, shows CAPTCHA
 images for the user to answer, accepts SMS OTPs, and preserves the browser
 session between steps. Scholarship registration starts from `RegistrationNew.aspx`,
 uses an existing OTR, asks the fields in the supplied Fresh Postmatric form,
-and requires a final review and `CONFIRM` before submission. It returns the
+and requires a final review and `YES` before submission. It returns the
 official response screenshot. See [SCHOLARSHIP_REGISTRATION.md](SCHOLARSHIP_REGISTRATION.md)
 for supported courses, searchable institution lists, and verification limits.
 `/menu` and `/cancel` clear the current session. `/retry` retries a failed page

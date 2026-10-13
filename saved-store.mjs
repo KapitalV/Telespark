@@ -4,7 +4,8 @@ import {randomBytes,randomUUID,createCipheriv,createDecipheriv} from 'node:crypt
 import {telegramUserId} from './access.mjs';
 import {projectFields,projectResult,SAVE_STATUS} from './saved-schema.mjs';
 
-const idPattern=/^[RPF]-[a-f0-9]{32}$/;
+export const savedIdPattern=/^(?:[RPD][0-9]{4}|[RPF]-[a-f0-9]{32})$/;
+const idPattern=savedIdPattern;
 const failure=()=>new Error('Saved session unavailable. Check the session ID, owner and encrypted storage.');
 export class SavedStore {
   constructor({directory=resolve('data','saved-sessions'),keyFile=resolve('data','private','saved-session.key'),clock=()=>Date.now()}={}) {
@@ -28,6 +29,28 @@ export class SavedStore {
   }
   path(id) {if(!idPattern.test(id)) throw failure();return join(this.directory,id+'.enc');}
   serial(fn) {const next=this.queue.catch(()=>{}).then(fn);this.queue=next;return next;}
+  async nextId(module) {
+    const prefix=({registration:'R',poly:'D',password:'P'})[module];
+    if(!prefix) throw failure();
+    const reservations=join(this.directory,'.ids');
+    await mkdir(reservations,{recursive:true,mode:0o700});
+    const names=[...await readdir(this.directory),...await readdir(reservations)];
+    let highest=0;
+    for(const name of names) {
+      const id=name.replace(/\.enc$/,'');
+      if(new RegExp('^'+prefix+'[0-9]{4}$').test(id)) highest=Math.max(highest,Number(id.slice(1)));
+    }
+    for(let n=highest+1;n<=9999;n++) {
+      const id=prefix+String(n).padStart(4,'0');let handle;
+      try {
+        // Exclusive durable reservation prevents collisions across restarts and writers.
+        // Keep reservations even if a later record write fails or a record is removed.
+        handle=await open(join(reservations,id),'wx',0o600);await handle.sync();return id;
+      } catch(error) {if(error.code!=='EEXIST') throw failure();}
+      finally {await handle?.close();}
+    }
+    throw new Error('Four-digit session IDs are exhausted for this module. Existing records were not overwritten.');
+  }
   async read(id) {
     try {
       const file=this.path(id);if((await stat(file)).size>36*1024*1024) throw failure();
@@ -69,7 +92,7 @@ export class SavedStore {
       if(id) {
         record=await this.read(id);
         if(record.userId!==userId || record.module!==module || !['draft','ready'].includes(record.status)) throw failure();
-      } else record={version:1,id:(module==='password'?'P-':module==='poly'?'F-':'R-')+randomUUID().replaceAll('-',''),userId,module,createdAt:now,attempts:0};
+      } else record={version:1,id:await this.nextId(module),userId,module,createdAt:now,attempts:0};
       Object.assign(record,{fields,status:ready?'ready':'draft',updatedAt:now});
       await this.write(record);return record;
     });

@@ -81,7 +81,7 @@ that redirect does not count as a live verification of the protected form.
 5. `/start` -> `2` -> `2`: only test with an applicant who has no existing OTR.
    Review the declaration and type `AGREE`. Answer category, mobile, CAPTCHA,
    OTP, and subsequent recognized portal fields. Review final details and type
-   `CONFIRM` only when correct. Do not create a duplicate registration for testing.
+   `YES` only when correct. Do not create a duplicate registration for testing.
 6. If an unsupported stage appears, stop. Record only the stage and non-personal
    control labels needed to improve the adapter. Never put Aadhaar, OTPs, mobile
    numbers, or screenshots containing personal data in issues or test fixtures.

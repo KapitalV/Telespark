@@ -81,13 +81,12 @@ async function chat(t,{storageFixture,submit}={}) {
 }
 async function six(f) {for(const value of ['/start','1','Fresh','000012345678','9876543210','CBSE BOARD','2021','000012345']) await f.say(value);}
 
-test('Password flow requires /save then /psave; retrieval and restart never submit again',async t=>{
+test('Password flow saves automatically without /save or /psave; retrieval and restart never submit again',async t=>{
   const f=await chat(t,{submit:async(store,state)=>{assert.equal((await store.get(state.savedId,99)).status,'attempted');return {kind:'success',password:'Private1@',registration:'000012345678',slip:Buffer.from('SLIP')};}});
-  await six(f);assert.deepEqual(f.counts(),{opens:0,submits:0});
-  await f.say('AbC12');await f.say('/psave');assert.match(f.sent.at(-1).text,/Open \/save first/);
-  await f.say('/save');await f.say('/psave');const id=f.recovery.sessions.get(99).savedId;
+  await six(f);assert.deepEqual(f.counts(),{opens:1,submits:0});
   assert.equal(f.recovery.sessions.get(99).phase,'captcha');
   const message=f.message('AbC12');await Promise.all([f.router.handle(message),f.router.handle(message)]);
+  const id=f.recovery.sessions.get(99).savedId;assert.equal(id,'P0001');
   assert.equal(f.counts().submits,1);assert.equal((await f.store.get(id,99)).status,'confirmed');
   await f.say('/cancel');await f.say(`/psave ${id}`);assert.ok(f.sent.some(m=>m.text?.includes('Latest recovered password: Private1@')));assert.equal(f.counts().submits,1);
   const loaded=new SavedStore(f.options);await loaded.init();const restarted=await chat(t,{storageFixture:{...f,store:loaded}});
@@ -98,9 +97,8 @@ test('Password flow requires /save then /psave; retrieval and restart never subm
 test('Reuse makes a new record with fresh CAPTCHA; expiry preserves encrypted history and no automatic retry',async t=>{
   const f=await chat(t,{submit:async()=>({kind:'unknown'})});await six(f);await f.say('/save');await f.say('/psave');
   const oldId=f.recovery.sessions.get(99).savedId;await f.say('AbC12');assert.equal((await f.store.get(oldId,99)).status,'uncertain');
-  await f.say(`/reuse ${oldId}`);assert.equal(f.recovery.sessions.get(99).phase,'save-required');assert.equal(f.counts().submits,1);
-  await f.say('/psave');assert.match(f.sent.at(-1).text,/Open \/save first/);
-  await f.say('/save');await f.say('/psave');const newId=f.recovery.sessions.get(99).savedId;assert.notEqual(newId,oldId);assert.equal(f.counts().opens,2);
+  await f.say(`/reuse ${oldId}`);assert.equal(f.recovery.sessions.get(99).phase,'captcha');assert.equal(f.counts().submits,1);
+  await f.say('/psave');const newId=f.recovery.sessions.get(99).savedId;assert.notEqual(newId,oldId);assert.equal(f.counts().opens,2);
   f.advance(21*60_000);await f.router.expire();assert.equal(f.recovery.sessions.size,0);
   assert.equal((await f.store.get(newId,99)).status,'ready');assert.equal((await f.store.get(oldId,99)).status,'uncertain');
 });
@@ -116,7 +114,7 @@ test('Admin sees all statuses but only the owner can retrieve or reuse saved det
 
 test('Failure to save or mark an attempt prevents portal submission; outcome saving can retry without a second POST',async t=>{
   const f=await chat(t);await six(f);await f.say('/save');
-  const original=f.store.write;f.store.write=async()=>{throw Error('PRIVATE storage error');};await f.say('/psave');assert.equal(f.counts().opens,0);
+  const original=f.store.write;f.store.write=async()=>{throw Error('PRIVATE storage error');};await f.say('/psave');assert.equal(f.counts().submits,0);
   f.store.write=original;await f.say('/psave');
   f.store.write=async()=>{throw Error('PRIVATE storage error');};await f.say('AbC12');assert.equal(f.counts().submits,0);
   f.store.write=original;
@@ -126,12 +124,28 @@ test('Failure to save or mark an attempt prevents portal submission; outcome sav
   assert.ok(f.sent.every(m=>!m.text.includes('PRIVATE storage') && !m.text.includes('PRIVATE outcome')));
 });
 
-test('Portal correction requires re-saving changed fields; invalid CAPTCHA and expired CAPTCHA never replay automatically',async t=>{
+test('Portal corrections are saved automatically; invalid CAPTCHA and expired CAPTCHA never replay automatically',async t=>{
   let attempt=0;
   const f=await chat(t,{submit:async()=>++attempt===1?{kind:'correction',field:'year',message:'Correct the year'}:{kind:'captcha',message:'Wrong CAPTCHA'}});
   await six(f);await f.say('/save');await f.say('/psave');const id=f.recovery.sessions.get(99).savedId;await f.say('AbC12');
-  assert.equal((await f.store.get(id,99)).status,'draft');await f.say('2020');assert.equal(f.recovery.sessions.get(99).phase,'save-required');
-  await f.say('/psave');assert.equal((await f.store.get(id,99)).fields.year.value,'2020');
+  assert.equal((await f.store.get(id,99)).status,'draft');await f.say('2020');assert.equal(f.recovery.sessions.get(99).phase,'captcha');
   f.advance(6*60_000);await f.say('AbC12');assert.equal(f.counts().submits,1);
-  await f.say('AbC12');assert.equal(f.counts().submits,2);assert.equal((await f.store.get(id,99)).status,'ready');
+  await f.say('AbC12');assert.equal(f.counts().submits,2);assert.equal((await f.store.get(id,99)).status,'ready');assert.equal((await f.store.get(id,99)).fields.year.value,'2020');
+});
+
+test('Short IDs sequence independently, survive restart and concurrent writers, preserve legacy access and never wrap',async t=>{
+  const f=await storage(t);
+  const legacy='R-'+ 'a'.repeat(32);
+  await f.store.write({id:legacy,version:1,userId:'99',module:'registration',fields:{},status:'draft',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),attempts:0});
+  const other=new SavedStore(f.options);await other.init();
+  const records=await Promise.all([f.store.save({userId:99,module:'registration',fields:{}}),other.save({userId:42,module:'registration',fields:{}})]);
+  assert.deepEqual(records.map(r=>r.id).sort(),['R0001','R0002']);
+  assert.equal((await f.store.save({userId:99,module:'poly',fields:{}})).id,'D0001');
+  assert.equal((await f.store.save({userId:99,module:'password',fields})).id,'P0001');
+  const restarted=new SavedStore(f.options);await restarted.init();assert.equal((await restarted.get(legacy,99)).id,legacy);
+  assert.equal((await restarted.save({userId:99,module:'registration',fields:{}})).id,'R0003');
+  await assert.rejects(restarted.get('D0001',42));
+  await writeFile(join(f.options.directory,'.ids','D9999'),'');
+  await assert.rejects(restarted.save({userId:99,module:'poly',fields:{}}),/exhausted/);
+  assert.equal((await restarted.get('D0001',99)).id,'D0001');
 });

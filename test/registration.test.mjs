@@ -60,7 +60,7 @@ test('Registration timeout durably records an uncertain outcome and cannot be re
   const store=await savedStore(t);let submits=0;
   const portal={answers:new Map([['ContentPlaceHolder1_txt_pwd',{value:'Example1@'}]]),open:async()=>({kind:'form',fields:[{key:'captcha',type:'captcha'}],action:{kind:'register'},fingerprint:'f',image:Buffer.from('image'),review:['Synthetic student']}),submit:async()=>{submits++;await new Promise(()=>{});},close:async()=>{portal.answers.clear();}};
   const f=chat(portal,{store,timeoutMs:25});
-  for(const answer of ['/start','2','2','AbC12','/save','/dsave','CONFIRM']) await f.say(answer);
+  for(const answer of ['/start','2','2','AbC12','YES']) await f.say(answer);
   const state=f.bot.sessions.get(42);assert.equal(state.phase,'unknown');assert.equal((await store.get(state.savedId,42)).status,'uncertain');
   await f.say('CONFIRM');await f.say('/dsave');assert.equal(submits,1);
 });
@@ -186,12 +186,11 @@ test('Registration browser workflow with observed controls (network fully interc
     await untilCaptcha(f);await f.say('AbC12');await f.say('CONFIRM');await f.say('CONFIRM');
     assert.equal(f.bot.sessions.get(42).phase,'unknown');assert.equal(fs.posts.filter(p=>p.has('final')).length,1);
   });
-  await t.test('Save before CONFIRM, persist receipt, retrieve after cancellation and reuse against fresh live options',async st=>{
+  await t.test('Optional /dsave without /save, YES submits, automatic reuse save and receipt retrieval',async st=>{
     const store=await savedStore(st),fs=await fixture(),f=chat(fs.portal,{store});
-    await untilCaptcha(f);await f.say('AbC12');await f.say('CONFIRM');
-    assert.equal(fs.posts.filter(p=>p.has('final')).length,0);assert.match(f.sent.at(-1).text,/Save the current details/);
-    await f.say('/dsave');assert.match(f.sent.at(-1).text,/Open \/save first/);
-    await f.say('/save');await f.say('/dsave');
+    await untilCaptcha(f);await f.say('AbC12');
+    assert.equal(fs.posts.filter(p=>p.has('final')).length,0);assert.match(f.sent.at(-1).text,/Type YES/);
+    await f.say('/dsave');
     const id=f.bot.sessions.get(42).savedId,ready=await store.get(id,42);
     const screenshot=fs.portal.page.screenshot.bind(fs.portal.page);
     fs.portal.page.screenshot=options=>{assert.match(options.mask[0].toString(),/txtCaptcha/);assert.match(options.mask[0].toString(),/otp/);return screenshot(options);};
@@ -199,7 +198,7 @@ test('Registration browser workflow with observed controls (network fully interc
     assert.equal(ready.fields[p+'ddl_institute'].label,'College 42');assert.equal(ready.fields[p+'ddl_district'].label,'Jalaun');
     assert.equal(ready.fields.studentName.value,'TEST STUDENT');assert.equal(ready.fields.linkedMobile.value,'9876543210');
     assert.equal(ready.fields[p+'txtCaptcha'],undefined);assert.equal(ready.fields[p+'txt_pwd_confirm'],undefined);
-    const confirm=f.message('CONFIRM');await Promise.all([f.router.handle(confirm),f.router.handle(confirm)]);
+    const confirm=f.message('YES');await Promise.all([f.router.handle(confirm),f.router.handle(confirm)]);
     assert.equal(fs.posts.filter(p=>p.has('final')).length,1);
     const result=await store.get(id,42);assert.equal(result.status,'uncertain');assert.ok(result.result.image);
     await f.say('/cancel');await f.say(`/dsave ${id}`);assert.ok(f.sent.some(m=>m.name===`${id}.png`));
@@ -209,8 +208,8 @@ test('Registration browser workflow with observed controls (network fully interc
     assert.equal(reused.portal.answers.get(p+'txt_pwd').value,'Example1@');
     assert.equal(reused.portal.answers.get(p+'txt_hghrollno').value,'000012345');
     assert.equal(reused.posts.filter(p=>p.has('final')).length,0);
-    await f.say('AbC12');await f.say('CONFIRM');assert.equal(reused.posts.filter(p=>p.has('final')).length,0);
-    await f.say('/save');await f.say('/dsave');assert.notEqual(f.bot.sessions.get(42).savedId,id);
+    await f.say('AbC12');await f.say('YES');assert.equal(reused.posts.filter(p=>p.has('final')).length,1);
+    assert.notEqual(f.bot.sessions.get(42).savedId,id);
     await f.say('/cancel');
     const changed={...ready.fields,[p+'ddl_institute']:{value:'42',label:'Different college'}};
     const draft=await store.save({userId:42,module:'registration',fields:changed});

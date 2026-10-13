@@ -1,6 +1,6 @@
 # Encrypted saved sessions
 
-Registration and password recovery require an encrypted save before a final submission. OTR recovery keeps its existing flow.
+Registration and password recovery save automatically before final submission. The user does not need to run `/save`, `/dsave` or `/psave` first. OTR recovery keeps its existing flow.
 
 | Command | Behavior |
 | --- | --- |
@@ -13,15 +13,15 @@ Registration and password recovery require an encrypted save before a final subm
 | `/dsave list [page]`, `/psave list [page]` | Browse your own records while another form is active. |
 | `/reuse SESSION_ID` | Load saved fields into a fresh session; creates a new record when saved. |
 
-Registration: complete fields and CAPTCHA → `/save` → `/dsave` → review → `CONFIRM`.
+Registration: complete fields and CAPTCHA → review → `YES` → automatic save → submit once.
 
-Password recovery: six answers → `/save` → `/psave` → fresh CAPTCHA → submit.
+Password recovery: six answers → fresh CAPTCHA → automatic save → submit once.
 
-`/save` keeps the current browser open. Saving incomplete fields creates a **Draft**; save again when all fields are complete to mark it **Ready**. Correcting a recovery answer requires another save. An expired CAPTCHA requires fresh input.
+`/save` keeps the current browser open. Saving incomplete fields creates a **Draft**; the bot updates it to **Ready** automatically before submission. Corrected recovery answers are saved automatically. An expired CAPTCHA requires fresh input.
 
-Each record has a unique `R-…` or `P-…` ID, owner, timestamps, attempt count and status: **Draft**, **Ready**, **Submission attempted**, **Confirmed success** or **Outcome uncertain**. The submission marker is persisted before the final portal method is called. A crash or timeout never triggers replay. Password recovery can record verified success; registration's screenshot-only response stays uncertain. Failed outcome storage does not repeat the request: use `/dsave` or `/psave` to retry saving a result still in memory.
+New records use sequential IDs: `R0001` for registration, `D0001` for form filling and `P0001` for password recovery. Each record has an owner, timestamps, attempt count and status: **Draft**, **Ready**, **Submission attempted**, **Confirmed success** or **Outcome uncertain**. The submission marker is persisted before the final portal method is called. A crash or timeout never triggers replay. Password recovery can record verified success; registration's screenshot-only response stays uncertain. Failed outcome storage does not repeat the request: use `/dsave` or `/psave` to retry saving a result still in memory.
 
-Only the originating Telegram user can retrieve/reuse details and images. Admin dashboards show status metadata, not other users' passwords or applicant fields. Removed users cannot access saved records. Cancellation, timeout and restart clear the browser and memory but retain encrypted copies. Reuse validates saved selections against current portal values and labels and asks again if an option changed. It requires another save and fresh verification. Opening a record never submits to the website.
+Only the originating Telegram user can retrieve/reuse details and images. Admin dashboards show status metadata, not other users' passwords or applicant fields. Removed users cannot access saved records. Cancellation, timeout and restart clear the browser and memory but retain encrypted copies. Reuse validates saved selections against current portal values and labels and asks again if an option changed. It requires fresh verification and saves automatically. Opening a record never submits to the website.
 
 ## Storage and backup
 
@@ -38,4 +38,10 @@ Saved records have no automatic expiry or deletion. Old sessions cleared before 
 
 ## Verification
 
-Tests cover encrypted restart recovery, missing/wrong keys, tampering, owner isolation, admin metadata, interrupted submissions, failed writes, stale saved values, correction and CAPTCHA expiry, result re-delivery, and new-session reuse. Intercepted browser tests cover registration save → confirmation → receipt → retrieval → reuse against current options. No live registration or password reset is performed by these tests.
+Tests cover encrypted restart recovery, missing/wrong keys, tampering, owner isolation, admin metadata, interrupted submissions, failed writes, stale saved values, correction and CAPTCHA expiry, result re-delivery, and new-session reuse. Intercepted browser tests cover optional saves, YES confirmation, automatic saving, receipt retrieval and reuse against current options. No live registration or password reset is performed by these tests.
+
+## Short session IDs
+
+Sequences are independent per module and shared across users. Ownership checks still apply to every read and reuse. IDs contain one letter and four digits, from 0001 to 9999; exhaustion stops new saves instead of overwriting records or rolling over. Existing long R-/P-/F- IDs remain readable and are not renamed. CONFIRM remains a compatibility alias; current prompts use YES.
+
+The `.ids/` folder inside saved-session storage reserves numbers atomically. Keep it with your backups so deleted/failed record numbers are never reassigned. A failed save can leave a gap in the sequence. No candidate details or credentials are stored in reservation files.

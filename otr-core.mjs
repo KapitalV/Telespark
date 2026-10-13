@@ -212,7 +212,7 @@ export class OtrBot {
     if (text.startsWith('/')) return this.telegram.send(id, 'Use /menu, /cancel, /refresh, /resend, or /result where available.');
     if ((message.reply_to_message?.message_id && message.reply_to_message.message_id !== state.promptId) || (message.date && (message.date + 1) * 1000 < state.promptAt)) return this.telegram.send(id, 'That reply belongs to an older step. Answer the latest prompt.');
     if (state.phase === 'confirm') {
-      if (command !== 'confirm') return this.telegram.send(id, 'Type CONFIRM to submit this final registration, or /cancel.');
+      if (!['yes','confirm'].includes(command)) return this.telegram.send(id, 'Type YES to submit this final registration, or /cancel.');
       return this.submit(id, state);
     }
     const field = state.step.fields[state.index];
@@ -241,7 +241,7 @@ export class OtrBot {
       const display = ['aadhaar','mobile'].includes(f.type) ? `••••${value.slice(-4)}` : f.options?.find(o => o.value === value)?.label ?? value;
       return `${f.label}: ${display}`;
     }).join('\n');
-    const sent = await this.telegram.send(id, `Review the final details:\n${summary}\nType CONFIRM to submit OTR registration, or /cancel. Only one OTR is permitted per student.`, {protect_content:false});
+    const sent = await this.telegram.send(id, `Review the final details:\n${summary}\nType YES to submit OTR registration, or /cancel. Only one OTR is permitted per student.`, {protect_content:false});
     state.promptId = sent.message_id;
     state.promptAt = this.clock();
   }
