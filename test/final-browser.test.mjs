@@ -20,6 +20,8 @@ test('Final portal uses only observed controls, separates waiting/unknown, handl
         const req=route.request(),u=new URL(req.url());if(u.origin!==POLY_ORIGIN)return route.abort();
         if(u.pathname==='/captcha-test.svg')return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><text y="20">AbC12</text></svg>'});
         if(/LoginStudentPost(?:Renew)?\.aspx/.test(u.pathname))return route.fulfill({contentType:'text/html',body:req.method()==='POST'?'<script>location.replace("/PostMatric/Default.aspx")</script>':login(type)});
+        if(u.pathname==='/PostMatric/FinalDisclaimer.aspx')return route.fulfill({contentType:'text/html',body:`<script>location.replace('${options.badRedirect?'/PostMatric/UnknownPrint.aspx':'/PostMatric/FinalPrintInstitute.aspx'}')</script>`});
+        if(u.pathname==='/PostMatric/FinalPrintInstitute.aspx')return route.fulfill({contentType:'text/html',body:form(options.portalError?"System.ArgumentException: Column 'AboutMotherFather' does not belong to table Table.<h1>Institution print</h1><p>Registration number:</p>":'<h1>Official institution print</h1><p>Registration number: 000012345678</p>')});
         if(u.pathname==='/PostMatric/FixtureFinalPrint.aspx')return route.fulfill({contentType:'text/html',body:form('<h1>Official institution-submission application print</h1><p>Registration number: '+(options.wrongPdf?'999912345678':'000012345678')+'</p>')});
         if(u.pathname==='/PostMatric/Default.aspx') {
           if(req.method()==='POST'){posts++;if(!options.uncertain)locked=true;}
@@ -40,6 +42,21 @@ test('Final portal uses only observed controls, separates waiting/unknown, handl
   await t.test('Already available print is readable PDF and never posts lock',async()=>{
     const f=await fixture({locked:true,print:true});assert.equal((await f.portal.read()).kind,'print-ready');
     const pdf=await f.portal.finalPdf();assert.equal(pdf.kind,'pdf');assert.equal(pdf.pages,1);assert.equal(f.posts(),0);
+  });
+  await t.test('Observed disclaimer redirect produces a validated PDF without another lock',async()=>{
+    const f=await fixture({locked:true,print:true});
+    await f.portal.page.locator('#'+p+'FinalPrint a').evaluate(el=>el.setAttribute('href','/PostMatric/FinalDisclaimer.aspx'));
+    const result=await f.portal.finalPdf();assert.equal(result.kind,'pdf');assert.equal(result.pages,1);assert.equal(f.posts(),0);
+  });
+  await t.test('Observed official server error is reported without creating a blank PDF',async()=>{
+    const f=await fixture({locked:true,print:true,portalError:true});
+    await f.portal.page.locator('#'+p+'FinalPrint a').evaluate(el=>el.setAttribute('href','/PostMatric/FinalDisclaimer.aspx'));
+    const result=await f.portal.finalPdf();assert.equal(result.kind,'print-unavailable');assert.match(result.message,/AboutMotherFather/);assert.equal(result.bytes,undefined);assert.equal(f.posts(),0);
+  });
+  await t.test('Disclaimer cannot redirect to an unmapped destination',async()=>{
+    const f=await fixture({locked:true,print:true,badRedirect:true});
+    await f.portal.page.locator('#'+p+'FinalPrint a').evaluate(el=>el.setAttribute('href','/PostMatric/FinalDisclaimer.aspx'));
+    await assert.rejects(f.portal.finalPdf());assert.equal(f.posts(),0);
   });
   await t.test('Observed locked span and check icon mean waiting, never print-ready',async()=>{
     const f=await fixture({locked:true});

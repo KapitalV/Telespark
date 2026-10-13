@@ -35,4 +35,6 @@ Live Fresh inspection on 2026-10-13 verified the literal browser confirmation, t
 
 The bot takes an OS-owned token-specific local instance lock at startup. A second local copy exits before consuming Telegram updates; the lock releases on shutdown or crash. This prevents competing local conversations. Remote deployments using the same token must still be stopped separately.
 
+Final-print diagnosis on 2026-10-13 observed an enabled Fresh link to `FinalDisclaimer.aspx`, followed by navigation to `FinalPrintInstitute.aspx`. This specific transition is now allowed and the final destination is validated. The live final page returned `System.ArgumentException` for a missing `AboutMotherFather` column and blank applicant fields. The bot reports that portal-side failure as `print-unavailable`, creates no PDF, and does not repeat locking. A readable real final PDF cannot be confirmed until the portal returns a complete document. Offline tests cover the mapped transition, server-error handling, and rejection of unmapped destinations.
+
 Run `OTR_BROWSER_TESTS=true node --test --test-concurrency=1` (set the environment variable using your shell). Browser tests intercept all requests and use an offline context. On this machine use a temporary directory on D: because C: is full.

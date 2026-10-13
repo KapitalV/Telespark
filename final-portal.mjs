@@ -94,9 +94,19 @@ export class FinalPortal extends PolyPortal {
     const state=await this.page.evaluate(readFinalStatus),url=new URL(state.print.href);
     if(url.origin!==POLY_ORIGIN||!/^\/postmatric(?:renewal)?\/[a-z0-9_]+\.aspx$/i.test(url.pathname)||/tempprint/i.test(url.pathname)||!/संस्था.*प्रिंट|institution.*print|final.*print/i.test(state.print.text)) throw Error('Unsupported final print destination.');
     this.paths.add(url.pathname.toLowerCase());
+    // Observed Fresh flow redirects from the dashboard's disclaimer link to this print page.
+    // Permit only that mapped transition; other redirects remain blocked.
+    const printPath=url.pathname.toLowerCase()==='/postmatric/finaldisclaimer.aspx'?'/postmatric/finalprintinstitute.aspx':url.pathname.toLowerCase();
+    this.paths.add(printPath);
     await this.page.goto(url.href,{waitUntil:'domcontentloaded'});
     const s=await this.snapshot();
-    if(!this.safe(s)||new URL(s.url).pathname!==url.pathname||!s.text.replaceAll(/\s/g,'').includes(this.registration)||/जाँच हेतु आवेदन|जांच हेतु आवेदन|check.print|Some Error Occurred|Your Request Could Not Be Processed/i.test(s.text)) throw Error('Final print identity or content is not verified.');
+    if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==printPath) throw Error('Final print destination is not verified.');
+    if(/System\.(?:ArgumentException|NullReferenceException|Data\.[A-Za-z]+Exception)|Server Error in|Some Error Occurred|Your Request Could Not Be Processed/i.test(s.text)) {
+      return {kind:'print-unavailable',reason:'portal-error',message:/Column\s+'AboutMotherFather'\s+does not belong to table/i.test(s.text)
+        ? "The official Final Print page has a server error: the AboutMotherFather column is missing. The portal must fix this before a valid final PDF can be generated. Your application remains locked. Try option 5 later; locking will not be repeated."
+        : 'The official Final Print page returned a server error. No PDF was created. Your application remains locked. Try option 5 later; locking will not be repeated.'};
+    }
+    if(!s.text.replaceAll(/\s/g,'').includes(this.registration)||/जाँच हेतु आवेदन|जांच हेतु आवेदन|check.print/i.test(s.text)) throw Error('Final print identity or content is not verified.');
     const native=s.links.find(l=>/\.pdf(?:[?#]|$)/i.test(l.href)&&new URL(l.href).origin===POLY_ORIGIN);
     let bytes;
     if(native) {

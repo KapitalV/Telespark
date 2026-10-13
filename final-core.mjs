@@ -49,7 +49,12 @@ export class FinalBot {
     return this.say(id,step.kind==='unknown'?'A lock request may have been submitted, but the outcome is uncertain. Check the official portal before any new attempt. No automatic resubmission will occur.':step.kind==='expired'?'The portal session expired. Use /start → 5 for a fresh login.':step.message||'This portal stage is not mapped. No further action was submitted. Complete or inspect this stage on the official portal.');
   }
   async download(id,s) {
-    s.phase='printing';const result=await this.call(id,s,'finalPdf');s.pdf=result.bytes;s.phase='done';
+    s.phase='printing';const result=await this.call(id,s,'finalPdf');
+    if(result.kind==='print-unavailable') {
+      s.phase='blocked';await s.portal.close();
+      return this.say(id,result.message);
+    }
+    s.pdf=result.bytes;s.phase='done';
     await s.portal.close();return this.deliver(id,s);
   }
   async deliver(id,s) {
