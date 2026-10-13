@@ -7,13 +7,17 @@ export function readFinalStatus() {
   const visible=e=>!!e?.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
   const link=e=>visible(e)&&e.matches('a[href]')&&!e.hasAttribute('disabled')&&e.getAttribute('aria-disabled')!=='true'&&!e.classList.contains('aspNetDisabled')?{id:e.id,href:e.href,text:e.innerText.trim(),target:e.target}:undefined;
   const lock=document.getElementById('ContentPlaceHolder1_Href_temp_lock');
+  // Read the portal's literal confirmation; never execute or infer arbitrary script.
+  const onclick=lock?.getAttribute('onclick')||'';
+  const confirmation=onclick.match(/^\s*return\s+confirm\(\s*(['"])([^\\\r\n]*?)\1\s*\)\s*;?\s*$/);
+  const declaration=confirmation?.[2];
   const final=document.getElementById('ContentPlaceHolder1_FinalPrint');
   const print=final?.matches('a')?final:final?.querySelector('a[href]');
   const rows=[...document.querySelectorAll('table')].filter(visible).map(e=>e.innerText.trim());
   const identity=rows.find(t=>/रजिस्ट्रेशन संख्या|Registration\s*(?:Number|No)/i.test(t))||'';
   const lockRow=document.getElementById('ContentPlaceHolder1_templock');
   const locked=visible(lockRow)&&!visible(lock)&&(/\uf058|✔|✓/.test(lockRow.innerText)||!!lockRow.querySelector('.fa-check-circle,.fa-check,.glyphicon-ok'));
-  return {lock:link(lock),print:link(print),locked,identity,notice:[lockRow,final].filter(visible).map(e=>e.innerText.trim()).join('\n')};
+  return {lock:link(lock),print:link(print),locked,identity,declaration,notice:[lockRow,final].filter(visible).map(e=>e.innerText.trim()).join('\n')};
 }
 
 export class FinalPortal extends PolyPortal {
@@ -31,9 +35,9 @@ export class FinalPortal extends PolyPortal {
     const image=await super.open();
     this.page.removeAllListeners('dialog');
     this.page.on('dialog',async dialog=>{
-      if(dialog.type()==='confirm'&&this.approvedDialog===dialog.message()) {this.approvedDialog=undefined;await dialog.accept();return;}
+      if(this.lockInFlight&&dialog.type()==='confirm'&&this.approvedDialog===dialog.message()) {this.approvedDialog=undefined;await dialog.accept();return;}
       if(this.lockInFlight&&dialog.type()==='confirm') this.pendingDialog=dialog.message();
-      else this.dialog='unknown';
+      else this.dialog=/captcha|कैप्चा/i.test(dialog.message())&&/invalid|incorrect|wrong|गलत|अमान्य/i.test(dialog.message())?'captcha':'unknown';
       await dialog.dismiss().catch(()=>{});
     });
     return image;
@@ -63,12 +67,13 @@ export class FinalPortal extends PolyPortal {
     if(state.locked) return {kind:'waiting',identity:state.identity,notice:state.notice};
     if(!state.lock) return {kind:'unsupported',message:'The portal has not enabled application locking or institution print. Complete its prerequisites first.'};
     if(!/^javascript:__doPostBack\('ctl00\$ContentPlaceHolder1\$Href_temp_lock',''\);?$/i.test(state.lock.href)||state.lock.target) return {kind:'unsupported'};
-    return {kind:'lock-review',identity:state.identity,notice:state.notice,token};
+    return {kind:'lock-review',identity:state.identity,notice:state.notice,declaration:state.declaration,token};
   }
   async lock(token,approvedDialog) {
     if(this.lockAttempted) return {kind:'unknown'};
     const current=await this.read();
     if(current.kind!=='lock-review'||current.token!==token) return {kind:'unsupported'};
+    if(current.declaration&&current.declaration!==approvedDialog) return {...current,kind:'dialog-review'};
     this.lockAttempted=true;this.lockInFlight=true;this.pendingDialog=undefined;this.approvedDialog=approvedDialog;
     let posts=0;
     const count=request=>{if(request.method()==='POST') posts++;};this.page.on('request',count);

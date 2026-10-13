@@ -19,6 +19,7 @@ import {PolyBot} from './poly-core.mjs';
 import {PolyPortal} from './poly-portal.mjs';
 import {FinalBot} from './final-core.mjs';
 import {FinalPortal} from './final-portal.mjs';
+import {acquireInstanceLock} from './instance-lock.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -30,6 +31,10 @@ if (owner && !/^\d+$/.test(owner)) {
   console.error('TELEGRAM_ALLOWED_USER_ID must be your numeric Telegram user ID.');
   process.exit(1);
 }
+
+let releaseInstance;
+try {releaseInstance=await acquireInstanceLock(token);}
+catch(error) {console.error(error.message);process.exit(1);}
 
 class Telegram {
   async api(method, body, multipart = false) {
@@ -119,6 +124,7 @@ async function shutdown() {
   webhookServer?.close();
   for (const chatId of bot.sessions.keys()) await bot.clear(chatId);
   await activity.record({event:'bot_stopped',module:'system'});
+  await releaseInstance();
   process.exit(0);
 }
 process.on('SIGINT',shutdown);
@@ -200,4 +206,5 @@ try {
   console.error(error.message);
   webhookServer?.close();
   process.exitCode = 1;
+  await releaseInstance();
 }

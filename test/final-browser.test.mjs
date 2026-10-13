@@ -41,12 +41,36 @@ test('Final portal uses only observed controls, separates waiting/unknown, handl
     const f=await fixture({locked:true,print:true});assert.equal((await f.portal.read()).kind,'print-ready');
     const pdf=await f.portal.finalPdf();assert.equal(pdf.kind,'pdf');assert.equal(pdf.pages,1);assert.equal(f.posts(),0);
   });
+  await t.test('Observed locked span and check icon mean waiting, never print-ready',async()=>{
+    const f=await fixture({locked:true});
+    await f.portal.page.locator('#'+p+'templock').evaluate(el=>{el.innerHTML='<span id="ContentPlaceHolder1_Span_temp_lock">Print after 3 days</span><i id="ContentPlaceHolder1_Img_temp_lock" class="fa fa-check-circle CompletedImg"></i>';});
+    await f.portal.page.locator('#'+p+'FinalPrint').evaluate(el=>{el.innerHTML='<span id="ContentPlaceHolder1_Span_final_Form">संस्था में जमा करने हेतु आवेदन प्रिंट करें</span>';});
+    assert.equal((await f.portal.read()).kind,'waiting');assert.equal(f.posts(),0);
+    await assert.rejects(f.portal.finalPdf(),/not available/);assert.equal(f.posts(),0);
+  });
   await t.test('Dialog is dismissed for review then accepted only when exactly approved',async()=>{
     const f=await fixture({dialog:true});const first=await f.portal.read();
     f.portal.page.setDefaultNavigationTimeout(2000);
     const dialog=await f.portal.lock(first.token);assert.equal(dialog.kind,'dialog-review');assert.equal(f.posts(),0);
     f.portal.page.setDefaultNavigationTimeout(10_000);
     assert.equal((await f.portal.lock(dialog.token,dialog.declaration)).kind,'waiting');assert.equal(f.posts(),1);
+  });
+  await t.test('Live-style onclick confirmation is included in initial review and accepted once',async()=>{
+    const f=await fixture();
+    const declaration='Are You Sure to Submit form for Preliminarily Scrutiny (Please make Sure after select Yes will not able to edit Application)?';
+    await f.portal.page.locator('#'+p+'Href_temp_lock').evaluate((el,text)=>el.setAttribute('onclick',`return confirm('${text}')`),declaration);
+    const review=await f.portal.read();assert.equal(review.declaration,declaration);
+    assert.equal((await f.portal.lock(review.token,'unreviewed')).kind,'dialog-review');assert.equal(f.posts(),0);
+    assert.equal((await f.portal.lock(review.token,declaration)).kind,'waiting');assert.equal(f.posts(),1);
+    assert.equal((await f.portal.lock(review.token,declaration)).kind,'unknown');assert.equal(f.posts(),1);
+  });
+  await t.test('Changed confirmation invalidates the original review before submitting',async()=>{
+    const f=await fixture();
+    const link=f.portal.page.locator('#'+p+'Href_temp_lock');
+    await link.evaluate(el=>el.setAttribute('onclick',"return confirm('Original warning')"));
+    const review=await f.portal.read();
+    await link.evaluate(el=>el.setAttribute('onclick',"return confirm('Changed warning')"));
+    assert.equal((await f.portal.lock(review.token,review.declaration)).kind,'unsupported');assert.equal(f.posts(),0);
   });
   await t.test('Unchanged result is uncertain; stale review and different applicant cannot lock',async()=>{
     const f=await fixture({uncertain:true});assert.equal((await f.portal.lock('stale')).kind,'unsupported');assert.equal(f.posts(),0);
