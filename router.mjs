@@ -4,8 +4,8 @@ import {telegramUserId} from './access.mjs';
 
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, registration, poly, access, activity, saves, allowedUserId = '', enableOtr = false, enablePoly=false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, registration, poly, access, activity, saves, allowedUserId:String(allowedUserId), enableOtr, enablePoly, clock});
+  constructor({telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId = '', enableOtr = false, enablePoly=false, enableFinal=false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId:String(allowedUserId), enableOtr, enablePoly, enableFinal, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
@@ -24,14 +24,14 @@ export class BotRouter {
 
   async clear(id) {
     this.sessions.delete(id);
-    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id)]);
+    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id),this.final?.clear(id)]);
   }
 
   async expire() {
     const previous=[...this.sessions.keys()].map(id=>({id,...this.activityContext(id)}));
-    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire()]);
+    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire(),this.final?.expire()]);
     for (const [id, state] of this.sessions) {
-      if (this.clock() - state.updated > 20 * 60_000 && !this.poly?.sessions.get(id)?.busy) await this.clear(id);
+      if (this.clock() - state.updated > 20 * 60_000 && !this.poly?.sessions.get(id)?.busy&&!this.final?.sessions.get(id)?.busy) await this.clear(id);
     }
     for(const before of previous) {
       const after=this.activityContext(before.id);
@@ -42,7 +42,7 @@ export class BotRouter {
   async menu(id, submenu = false) {
     await this.clear(id);
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
-    const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR'],['3. Form filling OTNew-Poly']];
+    const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR'],['3. Form filling OTNew-Poly'],['4. Saved sessions'],['5. Form lock & Final Print']];
     return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity logs exclude your answers, passwords and images.'+(this.saves?'\nDetails are saved automatically before submission. /save lists saved sessions; /dsave and /psave are optional. Saved fields, passwords and results are encrypted and remain available after restart. OTPs, CAPTCHA answers and cookies are never saved. /cancel clears only the active session.':''), {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
@@ -50,7 +50,7 @@ export class BotRouter {
 
   activityContext(id) {
     const module=this.sessions.get(id)?.module || 'none';
-    const state=({password:this.recovery,otr:this.otr,registration:this.registration,poly:this.poly}[module])?.sessions?.get(id);
+    const state=({password:this.recovery,otr:this.otr,registration:this.registration,poly:this.poly,final:this.final}[module])?.sessions?.get(id);
     const phase=state?.phase || (['menu','otr-menu'].includes(module)?module:'none');
     const field=module==='password'
       ? (phase==='questions'?questionAt(state.index,state.details)?.[0]:phase==='correction'?state.correction:phase==='captcha'?'captcha':undefined)
@@ -112,6 +112,9 @@ export class BotRouter {
       }
       return this.telegram.send(id,JSON.stringify(valid?{ok:true,status:'200 OK',service:'OTNew-Poly',enabled:this.enablePoly,portalVerified:false,message:'Bot is responding. This test does not submit or verify a portal application.'}:{ok:false,error:{code:'INVALID_TEST_REQUEST',message:'Send /test without arguments.'}}));
     }
+    if(command==='/result'&&/^L[0-9]{4}$/.test(text.split(/\s+/)[1]||'')) {
+      try {return await this.final.storedResult(id,text.split(/\s+/)[1]);} catch {return this.telegram.send(id,'Saved final PDF unavailable. Check the session ID and owner.');}
+    }
     if(command==='/result'&&/^(?:D[0-9]{4}|F-[a-f0-9]{32})$/.test(text.split(/\s+/)[1]||'')) {
       try {return await this.poly.storedResult(id,text.split(/\s+/)[1]);} catch {return this.telegram.send(id,'Saved PDF unavailable. Check the session ID and owner.');}
     }
@@ -131,6 +134,11 @@ export class BotRouter {
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();
     if (state.module === 'menu') {
+      if(/^4(?:\.|$)/.test(text)) return this.saves?this.saves.dashboard(id):this.telegram.send(id,'Saved sessions are unavailable.');
+      if(/^5(?:\.|$)/.test(text)) {
+        if(!this.enableFinal||!this.final) return this.telegram.send(id,'Form lock & Final Print is disabled.');
+        state.module='final';return this.final.start(id);
+      }
       if(/^3(?:\.|$)/.test(text)) {
         if(!this.enablePoly||!this.poly) return this.telegram.send(id,'OTNew-Poly is disabled pending live validation. Existing modules remain available.');
         state.module='poly';return this.poly.start(id);
@@ -143,7 +151,7 @@ export class BotRouter {
         if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Choose 1 for password recovery.');
         return this.menu(id, true);
       }
-      return this.telegram.send(id, 'Choose 1 for Password recovery, 2 for OTR, or 3 for Form filling OTNew-Poly.');
+      return this.telegram.send(id, 'Choose 1 for Password recovery, 2 for OTR, 3 for Form filling OTNew-Poly, 4 for saved sessions, or 5 for Form lock & Final Print.');
     }
     if (state.module === 'otr-menu') {
       if (/^back$/i.test(text)) return this.menu(id);
@@ -160,6 +168,7 @@ export class BotRouter {
     }
     if (state.module === 'password') return this.recovery.handle(message);
     if (state.module === 'poly') return this.poly.handle(message);
+    if (state.module === 'final') return this.final.handle(message);
     if (state.module === 'registration') return this.registration.handle(message);
     return this.otr.handle(message);
   }

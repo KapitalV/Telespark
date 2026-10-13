@@ -7,9 +7,10 @@ export const REGISTRATION_SAVED_FIELDS={
   [p+'ddl_highschpassyear']:'Passing year',[p+'ddl_board']:'Board',[p+'txt_hghrollnoA']:'Roll prefix',
   [p+'txt_hghrollno']:'Roll number',[p+'txt_pwd']:'Chosen password',studentName:'Student name',linkedMobile:'Linked mobile',
 };
+export const FINAL_FIELDS={registration:'Registration number',otr:'OTR number',applicationType:'Application type',status:'Stage'};
 export const SAVE_STATUS={draft:'Draft',ready:'Ready',attempted:'Submission attempted',confirmed:'Confirmed success',uncertain:'Outcome uncertain'};
 export function projectFields(module,fields={}) {
-  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:module==='poly'?POLY_FIELDS:undefined;
+  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:module==='poly'?POLY_FIELDS:module==='final'?FINAL_FIELDS:undefined;
   if(!allowed) throw new Error('Unsupported saved module.');
   const clean={};
   for(const key of Object.keys(allowed).sort()) {

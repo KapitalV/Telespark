@@ -17,6 +17,8 @@ import {SavedStore} from './saved-store.mjs';
 import {SavedSessions} from './saved-sessions.mjs';
 import {PolyBot} from './poly-core.mjs';
 import {PolyPortal} from './poly-portal.mjs';
+import {FinalBot} from './final-core.mjs';
+import {FinalPortal} from './final-portal.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -95,7 +97,8 @@ const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,sa
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 }),activity,{userId,module:'registration'})});
 const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:()=>new PolyPortal({headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
-const bot = new BotRouter({telegram, recovery, otr, registration, poly, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true'});
+const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:applicationType=>new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
+const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
 let lastMalformedAlert = -Infinity;
 async function reportMalformed({httpStatus=400}={}) {
   await activity.record({event:'system_error',module:'system',action:'webhook',reason:'invalid-arguments',httpStatus});

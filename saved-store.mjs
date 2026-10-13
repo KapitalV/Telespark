@@ -4,7 +4,7 @@ import {randomBytes,randomUUID,createCipheriv,createDecipheriv} from 'node:crypt
 import {telegramUserId} from './access.mjs';
 import {projectFields,projectResult,SAVE_STATUS} from './saved-schema.mjs';
 
-export const savedIdPattern=/^(?:[RPD][0-9]{4}|[RPF]-[a-f0-9]{32})$/;
+export const savedIdPattern=/^(?:[RPDL][0-9]{4}|[RPF]-[a-f0-9]{32})$/;
 const idPattern=savedIdPattern;
 const failure=()=>new Error('Saved session unavailable. Check the session ID, owner and encrypted storage.');
 export class SavedStore {
@@ -30,7 +30,7 @@ export class SavedStore {
   path(id) {if(!idPattern.test(id)) throw failure();return join(this.directory,id+'.enc');}
   serial(fn) {const next=this.queue.catch(()=>{}).then(fn);this.queue=next;return next;}
   async nextId(module) {
-    const prefix=({registration:'R',poly:'D',password:'P'})[module];
+    const prefix=({registration:'R',poly:'D',password:'P',final:'L'})[module];
     if(!prefix) throw failure();
     const reservations=join(this.directory,'.ids');
     await mkdir(reservations,{recursive:true,mode:0o700});
@@ -62,7 +62,7 @@ export class SavedStore {
       decrypt.setAAD(Buffer.from('telespark/saved/v1/'+id));decrypt.setAuthTag(tag);
       const bytes=Buffer.concat([decrypt.update(Buffer.from(envelope.ciphertext,'base64')),decrypt.final()]);
       let value;try {value=JSON.parse(bytes.toString('utf8'));} finally {bytes.fill(0);}
-      if(value.id!==id || !SAVE_STATUS[value.status] || !['registration','password','poly'].includes(value.module)) throw failure();
+      if(value.id!==id || !SAVE_STATUS[value.status] || !['registration','password','poly','final'].includes(value.module)) throw failure();
       telegramUserId(value.userId);value.fields=projectFields(value.module,value.fields);value.result=projectResult(value.result);
       return value;
     } catch {throw failure();}

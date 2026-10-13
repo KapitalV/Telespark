@@ -1,14 +1,14 @@
-import {PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
+import {FINAL_FIELDS,PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
 import {questionAt,normalizeAnswer} from './core.mjs';
 import {POLY_FIELDS} from './poly-schema.mjs';
 import {savedIdPattern} from './saved-store.mjs';
 
 const dateFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',dateStyle:'short',timeStyle:'short',hour12:false});
-const commandFor=module=>module==='password'?'/psave':module==='poly'?'/save':'/dsave';
+const commandFor=module=>module==='password'?'/psave':['poly','final'].includes(module)?'/save':'/dsave';
 export class SavedSessions {
   constructor({store,telegram,access,activity,clock=()=>Date.now()}) {Object.assign(this,{store,telegram,access,activity,clock});}
   bind(router) {this.router=router;}
-  bot(module) {return module==='password'?this.router.recovery:module==='poly'?this.router.poly:this.router.registration;}
+  bot(module) {return module==='password'?this.router.recovery:module==='poly'?this.router.poly:module==='final'?this.router.final:this.router.registration;}
   async log(userId,event,module) {await this.activity?.record({event,userId,module});}
   async sendLines(id,lines) {
     let chunk='';
@@ -104,7 +104,7 @@ export class SavedSessions {
   }
   async show(id,sessionId,module) {
     const record=await this.store.get(sessionId,id);if(record.module!==module) throw new Error('Wrong module.');
-    const labels=module==='password'?PASSWORD_FIELDS:module==='poly'?POLY_FIELDS:REGISTRATION_SAVED_FIELDS;
+    const labels=module==='password'?PASSWORD_FIELDS:module==='poly'?POLY_FIELDS:module==='final'?FINAL_FIELDS:REGISTRATION_SAVED_FIELDS;
     const lines=[`${record.id} — ${SAVE_STATUS[record.status]}`,`Updated: ${dateFormat.format(new Date(record.updatedAt))} IST`,
       ...Object.entries(record.fields).map(([key,field])=>`${labels[key]}: ${(field.label ?? field.value) || '(none)'}`)];
     if(record.result?.password) lines.push(`Latest recovered password: ${record.result.password}`);
@@ -112,7 +112,7 @@ export class SavedSessions {
     lines.push(`Viewing this record does not contact the website. /reuse ${record.id} loads its fields into a fresh session; fresh verification is required; saving is automatic.`);
     await this.sendLines(id,lines);
     if(!this.access.canUse(id)) return;
-    if(record.result?.kind==='pdf') await this.router.poly.storedResult(id,sessionId);
+    if(record.result?.kind==='pdf') await this.bot(module).storedResult(id,sessionId);
     if(record.result?.image) await this.telegram.document(id,Buffer.from(record.result.image,'base64'),`${record.id}.png`,'Saved official website response. Use the saved status and image to assess the outcome.');
     await this.telegram.send(id,'Reuse saved details only when you intend to start a new request:',{reply_markup:{keyboard:[[`/reuse ${record.id}`],['/save']],resize_keyboard:true,one_time_keyboard:true}});
     await this.log(id,'session_viewed',module);
@@ -150,6 +150,11 @@ export class SavedSessions {
   }
   async reuse(id,sessionId) {
     const record=await this.store.get(sessionId,id);
+    if(record.module==='final') {
+      if(!this.router.enableFinal) return this.telegram.send(id,'Form lock & Final Print is disabled.');
+      await this.router.clear(id);this.router.sessions.set(id,{module:'final',updated:this.clock()});
+      return this.router.final.start(id);
+    }
     if(record.module==='poly'&&!this.router.enablePoly) return this.telegram.send(id,'OTNew-Poly is disabled pending live validation. Saved details and PDFs remain available.');
     if(record.module==='registration' && !this.router.enableOtr) return this.telegram.send(id,'Registration is disabled in this bot build.');
     await this.router.clear(id);

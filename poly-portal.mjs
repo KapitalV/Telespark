@@ -25,7 +25,7 @@ export function readPolyDocument() {
 
 export class PolyPortal {
   constructor({headless=true,channel=process.platform==='win32'?'msedge':'chromium',launch=options=>chromium.launch(options)}={}) {
-    Object.assign(this,{headless,channel,launch});this.answers=new Map();this.revision=0;this.closed=false;this.attempted=false;
+    Object.assign(this,{headless,channel,launch});this.paths=new Set(paths);this.loginPath='/LoginStudentPost.aspx';this.loginRadioId='rbtnFR_0';this.answers=new Map();this.revision=0;this.closed=false;this.attempted=false;
   }
   async open() {
     const browser=await this.launch({headless:this.headless,channel:this.channel==='chromium'?undefined:this.channel,timeout:30_000});
@@ -33,7 +33,7 @@ export class PolyPortal {
     this.context=await browser.newContext({viewport:{width:1280,height:960},acceptDownloads:true});
     await this.context.route('**/*',async route=>{
       const request=route.request(),u=new URL(request.url());
-      if(u.origin!==POLY_ORIGIN || (request.isNavigationRequest()&&!paths.has(u.pathname.toLowerCase())&&request.url()!==this.nativePdfUrl)) {
+      if(u.origin!==POLY_ORIGIN || (request.isNavigationRequest()&&!this.paths.has(u.pathname.toLowerCase())&&request.url()!==this.nativePdfUrl)) {
         if(request.isNavigationRequest()||['xhr','fetch'].includes(request.resourceType())) this.externalBlocked=true;
         return route.abort();
       }
@@ -41,22 +41,22 @@ export class PolyPortal {
     });
     this.page=await this.context.newPage();this.page.setDefaultTimeout(12_000);this.page.setDefaultNavigationTimeout(45_000);
     this.page.on('dialog',async dialog=>{this.dialog=/captcha|कैप्चा/i.test(dialog.message())&&/invalid|incorrect|wrong|गलत|अमान्य/i.test(dialog.message())?'captcha':'unknown';await dialog.dismiss().catch(()=>{});});
-    await this.page.goto(POLY_ORIGIN+'/LoginStudentPost.aspx',{waitUntil:'domcontentloaded'});
+    await this.page.goto(POLY_ORIGIN+this.loginPath,{waitUntil:'domcontentloaded'});
     return this.loginImage();
   }
   async snapshot() {return this.page.evaluate(readPolyDocument);}
   safe(s) {
-    try {const u=new URL(s.url),a=new URL(s.formAction||s.url);return !this.closed&&!this.externalBlocked&&!s.externalFrame&&u.origin===POLY_ORIGIN&&paths.has(u.pathname.toLowerCase())&&a.origin===POLY_ORIGIN&&a.pathname===u.pathname&&['','_self'].includes(s.target);} catch {return false;}
+    try {const u=new URL(s.url),a=new URL(s.formAction||s.url);return !this.closed&&!this.externalBlocked&&!s.externalFrame&&u.origin===POLY_ORIGIN&&this.paths.has(u.pathname.toLowerCase())&&a.origin===POLY_ORIGIN&&a.pathname===u.pathname&&['','_self'].includes(s.target);} catch {return false;}
   }
-  async loginImage() {const s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!=='/loginstudentpost.aspx') throw Error('Expected official login page.');return this.page.locator('#Captcha').screenshot();}
+  async loginImage() {const s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==this.loginPath.toLowerCase()) throw Error('Expected official login page.');return this.page.locator('#Captcha').screenshot();}
   async navigate(action) {
     const [response]=await Promise.all([this.page.waitForNavigation({waitUntil:'domcontentloaded'}),action()]);
     if(response?.status()>=400||this.externalBlocked) throw Error('Portal transition failed.');this.revision++;
   }
   async login({registration,otr,password,captcha}) {
-    let s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!=='/loginstudentpost.aspx') return {kind:'unsupported'};
+    let s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==this.loginPath.toLowerCase()) return {kind:'unsupported'};
     this.registration=registration;this.otr=otr;this.dialog=undefined;
-    for(const id of ['rbtnFR_0','rbtnLoginType_0']) {
+    for(const id of [this.loginRadioId,'rbtnLoginType_0']) {
       const element=this.page.locator(selector(PREFIX+id));
       if(!await element.isChecked()) {const live=(await this.snapshot()).fields.find(f=>f.id===PREFIX+id);if(live?.postback) await this.navigate(()=>element.check());else await element.check();}
     }
@@ -65,13 +65,13 @@ export class PolyPortal {
     const button=s.buttons.find(b=>b.id===PREFIX+'btnLogin');if(!this.safeButton(button,s)) return {kind:'unsupported'};
     await this.navigate(()=>this.page.locator(selector(button.id)).click());
     const next=await this.snapshot();
-    if(new URL(next.url).pathname.toLowerCase()==='/loginstudentpost.aspx') return {kind:'login-error',image:await this.loginImage()};
+    if(new URL(next.url).pathname.toLowerCase()===this.loginPath.toLowerCase()) return {kind:'login-error',image:await this.loginImage()};
     return this.read();
   }
   safeButton(button,s) {return button&&!button.disabled&&['','_self'].includes(button.target)&&new URL(button.action).origin===POLY_ORIGIN&&new URL(button.action).pathname===new URL(s.url).pathname;}
   async go(link) {
     if(!link||!['','_self'].includes(link.target)) throw Error('Official navigation unavailable.');
-    const url=new URL(link.href);if(url.origin!==POLY_ORIGIN||!paths.has(url.pathname.toLowerCase())) throw Error('Unknown destination.');
+    const url=new URL(link.href);if(url.origin!==POLY_ORIGIN||!this.paths.has(url.pathname.toLowerCase())) throw Error('Unknown destination.');
     // Navigate only to an href just inspected in this authenticated document.
     await this.page.goto(url.href,{waitUntil:'domcontentloaded'});this.revision++;return this.read();
   }
@@ -105,7 +105,7 @@ export class PolyPortal {
   async read() {
     const s=await this.snapshot();if(!this.safe(s)||this.dialog==='unknown') return {kind:'unsupported'};
     const path=new URL(s.url).pathname.toLowerCase();
-    if(path==='/loginstudentpost.aspx') return {kind:'expired'};
+    if(path===this.loginPath.toLowerCase()) return {kind:'expired'};
     if(path==='/postmatric/default.aspx') return this.operation==='certificates'&&s.certificatesComplete?{kind:'complete',stage:'certificates'}:{kind:'dashboard',certificatesComplete:s.certificatesComplete};
     if(path==='/postmatric/applicationaccept.aspx'&&s.text.includes('आपके आवेदन पत्र की प्रविष्टियाँ सफलतापूर्वक भरी गयीं है')) return {kind:'complete',stage:'form'};
     let stage;

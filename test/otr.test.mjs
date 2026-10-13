@@ -88,7 +88,7 @@ test('OTR validates mobile, OTP, Aadhaar, dates and preserves leading zeros', ()
 test('Menu routes the existing six-question password flow and supports back/cancel', async () => {
   const f = fixture();
   await f.route('/start');
-  assert.deepEqual(f.sent.at(-1).options.reply_markup.keyboard,[['1. Password recovery'],['2. OTR'],['3. Form filling OTNew-Poly']]);
+  assert.deepEqual(f.sent.at(-1).options.reply_markup.keyboard,[['1. Password recovery'],['2. OTR'],['3. Form filling OTNew-Poly'],['4. Saved sessions'],['5. Form lock & Final Print']]);
   await f.route('2'); await f.route('Back'); await f.route('1');
   for (const value of ['Fresh','000123456789','0000000000','UP BOARD','2021','001234567']) await f.route(value);
   assert.equal(f.recovery.sessions.get(42).phase,'captcha');

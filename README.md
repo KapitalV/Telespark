@@ -187,3 +187,7 @@ themselves still exist in the chat; session cleanup does not delete chat history
 
 See [OTR_TESTING.md](OTR_TESTING.md) for checks, the later manual test, and
 rollback. Local merge approval does not itself authorize a deployment.
+
+## Form lock and final institution print
+
+Option **5. Form lock & Final Print** supports Fresh/Renewal login, a configured default or custom password, CAPTCHA, review with YES, and final-PDF delivery when the portal makes it available. Option 4 opens saved sessions. See [workflow and live-validation limits](FINAL_PRINT.md).
