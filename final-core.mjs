@@ -50,30 +50,26 @@ export class FinalBot {
   }
   async download(id,s) {
     s.phase='printing';const result=await this.call(id,s,'finalPdf');
-    if(result.kind==='print-unavailable') {
-      s.phase='blocked';await s.portal.close();
-      return this.say(id,result.message);
-    }
-    s.pdf=result.bytes;s.phase='done';
+    s.incomplete=result.kind==='print-error-pdf';s.pdf=result.bytes;s.phase='done';
     await s.portal.close();return this.deliver(id,s);
   }
   async deliver(id,s) {
     if(!s.pdfSaved) {
-      const fields={...this.fields(s),status:{value:'final-print PDF'}};
+      const fields={...this.fields(s),status:{value:s.incomplete?'INCOMPLETE portal-error PDF':'final-print PDF'}};
       if(!s.pdfId) s.pdfId=(await this.store.save({userId:id,module:'final',fields,ready:true})).id;
       const record=await this.store.get(s.pdfId,id);
       if(record.status==='ready') await this.store.begin(s.pdfId,id,fields);
-      if(record.status!=='confirmed') await this.store.outcome(s.pdfId,id,{status:'confirmed',result:{kind:'pdf',pdf:s.pdf.toString('base64')}});
+      if(record.status!=='confirmed') await this.store.outcome(s.pdfId,id,{status:s.incomplete?'uncertain':'confirmed',result:{kind:'pdf',pdf:s.pdf.toString('base64'),incomplete:s.incomplete}});
       s.pdfSaved=true;
     }
     if(!this.canUse(id))return;
-    await this.telegram.document(id,s.pdf,`${s.pdfId}-final-print.pdf`,'Official institution-submission print. Follow the portal instructions for submitting the hard copy.');
-    return this.say(id,`Final PDF saved: ${s.pdfId}. Retrieve it with /result ${s.pdfId}.`);
+    await this.telegram.document(id,s.pdf,`${s.pdfId}-${s.incomplete?'INCOMPLETE-portal-error':'final-print'}.pdf`,s.incomplete?'INCOMPLETE: printout of the official portal error page. Applicant details may be blank. This is not a valid final application; use option 5 later after the portal is fixed. Locking will not be repeated.':'Official institution-submission print. Follow the portal instructions for submitting the hard copy.');
+    return this.say(id,`${s.incomplete?'Incomplete portal printout':'Final PDF'} saved: ${s.pdfId}. Retrieve it with /result ${s.pdfId}.`);
   }
   async storedResult(id,recordId) {
     if(!this.canUse(id))throw Error('Access denied');const record=await this.store.get(recordId,id);
     if(record.module!=='final'||record.result?.kind!=='pdf')throw Error('No final PDF');
-    return this.telegram.document(id,Buffer.from(record.result.pdf,'base64'),`${record.id}-final-print.pdf`,'Saved official institution-submission print. No portal request was made.');
+    return this.telegram.document(id,Buffer.from(record.result.pdf,'base64'),`${record.id}-${record.result.incomplete?'INCOMPLETE-portal-error':'final-print'}.pdf`,record.result.incomplete?'INCOMPLETE: saved portal-error printout, not a valid final application. No portal request was made.':'Saved official institution-submission print. No portal request was made.');
   }
   async lock(id,s) {
     const fields=this.fields(s);

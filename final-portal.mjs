@@ -1,6 +1,6 @@
 import {PolyPortal} from './poly-portal.mjs';
 import {POLY_ORIGIN,PREFIX} from './poly-schema.mjs';
-import {validatePolyPdf} from './poly-pdf.mjs';
+import {validatePolyPdf,validatePortalErrorPdf,PORTAL_PRINT_ERROR} from './poly-pdf.mjs';
 
 // Dashboard selectors come from the supplied official page. No row indexes are used.
 export function readFinalStatus() {
@@ -101,10 +101,11 @@ export class FinalPortal extends PolyPortal {
     await this.page.goto(url.href,{waitUntil:'domcontentloaded'});
     const s=await this.snapshot();
     if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==printPath) throw Error('Final print destination is not verified.');
-    if(/System\.(?:ArgumentException|NullReferenceException|Data\.[A-Za-z]+Exception)|Server Error in|Some Error Occurred|Your Request Could Not Be Processed/i.test(s.text)) {
-      return {kind:'print-unavailable',reason:'portal-error',message:/Column\s+'AboutMotherFather'\s+does not belong to table/i.test(s.text)
-        ? "The official Final Print page has a server error: the AboutMotherFather column is missing. The portal must fix this before a valid final PDF can be generated. Your application remains locked. Try option 5 later; locking will not be repeated."
-        : 'The official Final Print page returned a server error. No PDF was created. Your application remains locked. Try option 5 later; locking will not be repeated.'};
+    if(PORTAL_PRINT_ERROR.test(s.text)) {
+      // User requested the page print even on a portal failure. Keep it explicitly
+      // separate from a validated final application; do not manufacture missing fields.
+      const bytes=await this.printPage();const result=await validatePortalErrorPdf(bytes);
+      return {kind:'print-error-pdf',bytes,pages:result.pages};
     }
     if(!s.text.replaceAll(/\s/g,'').includes(this.registration)||/जाँच हेतु आवेदन|जांच हेतु आवेदन|check.print/i.test(s.text)) throw Error('Final print identity or content is not verified.');
     const native=s.links.find(l=>/\.pdf(?:[?#]|$)/i.test(l.href)&&new URL(l.href).origin===POLY_ORIGIN);
@@ -116,9 +117,14 @@ export class FinalPortal extends PolyPortal {
       for await(const chunk of stream) {size+=chunk.length;if(size>16*1024*1024)throw Error('PDF too large');chunks.push(chunk);}
       bytes=Buffer.concat(chunks);await download.delete();
     } else {
-      await this.page.evaluate(()=>document.fonts.ready);await this.page.emulateMedia({media:'print'});
-      bytes=await this.page.pdf({format:'A4',printBackground:true,preferCSSPageSize:true});
+      bytes=await this.printPage();
     }
     const result=await validatePolyPdf(bytes,this.registration);return {kind:'pdf',bytes,pages:result.pages};
+  }
+  async printPage() {
+    // The official PRINT THIS PAGE button calls window.print(). Headless PDF uses
+    // the same print layout without opening an unattended system printer dialog.
+    await this.page.evaluate(()=>document.fonts.ready);await this.page.emulateMedia({media:'print'});
+    return this.page.pdf({format:'A4',printBackground:true,preferCSSPageSize:true});
   }
 }

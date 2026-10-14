@@ -14,7 +14,7 @@ async function fixture(t,{initial='lock-review',result='print-ready',deliveryFai
   let incoming=1,outgoing=100,locks=0,pdfs=0,refreshes=0,closed=0,now=Date.now();const sent=[],events=[],types=[];
   const telegram={send:async(id,text,options)=>{sent.push({id,text,options});return {message_id:outgoing++};},photo:async(id,image,text)=>{sent.push({id,text,image});return {message_id:outgoing++};},document:async(id,bytes,name)=>{if(deliveryFails)throw Error('delivery');sent.push({id,bytes,name});}};
   const final=new FinalBot({telegram,store,canUse:id=>[42,99].includes(Number(id)),activity:{record:async e=>events.push(e)},defaultPassword:'Synthetic1@',clock:()=>now,timeoutMs,portalFactory:type=>{
-    types.push(type);return {open:async()=>Buffer.from('captcha'),close:async()=>{closed++;},refreshLogin:async()=>{refreshes++;return Buffer.from('fresh');},login:async input=>{assert.ok(input.password);return {kind:initial,identity:'Registration 000012345678',token:'review'};},lock:async()=>{locks++;if(lockFails)await new Promise(()=>{});return {kind:result};},finalPdf:async()=>{pdfs++;return portalError?{kind:'print-unavailable',message:'Official portal server error: AboutMotherFather. Try option 5 later.'}:{bytes:Buffer.from('%PDF-synthetic-final-fixture-only')};}};
+    types.push(type);return {open:async()=>Buffer.from('captcha'),close:async()=>{closed++;},refreshLogin:async()=>{refreshes++;return Buffer.from('fresh');},login:async input=>{assert.ok(input.password);return {kind:initial,identity:'Registration 000012345678',token:'review'};},lock:async()=>{locks++;if(lockFails)await new Promise(()=>{});return {kind:result};},finalPdf:async()=>{pdfs++;return portalError?{kind:'print-error-pdf',bytes:Buffer.from('%PDF-synthetic-portal-error-fixture-only')}:{bytes:Buffer.from('%PDF-synthetic-final-fixture-only')};}};
   }});
   const dummy={clear:async()=>{},expire:async()=>{}};
   const router=new BotRouter({telegram,recovery:dummy,otr:dummy,final,enableFinal:true,allowedUserId:'42',access:{canUse:id=>[42,99].includes(Number(id))},clock:()=>now});
@@ -34,11 +34,20 @@ test('Option 5, Fresh/Renewal, explicit YES and duplicate protection; secrets ab
   assert.ok(!JSON.stringify(f.events).includes('Synthetic1@'));await f.say('YES');assert.equal(f.counts().locks,1);
 });
 
-test('Portal print error is explained in chat without saving/delivering an invalid PDF or relocking',async t=>{
+test('Requested error print is delivered and retained as incomplete, including owner-only retries',async t=>{
   const f=await fixture(t,{initial:'print-ready',portalError:true});await f.login();
-  assert.match(f.sent.at(-1).text,/AboutMotherFather/);assert.equal(f.sent.some(m=>m.bytes),false);
-  assert.equal(f.final.sessions.get(42).phase,'blocked');assert.equal(f.counts().locks,0);
+  assert.match(f.sent.at(-1).text,/Incomplete portal printout/);
+  assert.ok(f.sent.some(m=>m.name==='L0001-INCOMPLETE-portal-error.pdf'));
+  const record=await f.store.get('L0001',42);assert.equal(record.result.incomplete,true);assert.equal(record.status,'uncertain');
+  assert.equal(f.final.sessions.get(42).phase,'done');assert.equal(f.counts().locks,0);
   await f.say('YES');assert.equal(f.counts().pdfs,1);assert.equal(f.counts().locks,0);
+  await f.say('/cancel');await f.say('/result L0001');assert.equal(f.sent.at(-1).name,'L0001-INCOMPLETE-portal-error.pdf');
+  await f.say('/result L0001',99);assert.match(f.sent.at(-1).text,/unavailable/);
+});
+test('Error print delivery failure retries the same PDF without relocking or regeneration',async t=>{
+  const f=await fixture(t,{initial:'print-ready',portalError:true,deliveryFails:true});await f.login();
+  f.delivery();await f.say('/result');assert.equal(f.counts().pdfs,1);assert.equal(f.counts().locks,0);
+  assert.ok(f.sent.some(m=>m.name==='L0001-INCOMPLETE-portal-error.pdf'));
 });
 test('Available final print skips locking; saved PDF owner isolation and delivery retry never relock',async t=>{
   const f=await fixture(t,{initial:'print-ready',deliveryFails:true});await f.login();assert.equal(f.counts().locks,0);

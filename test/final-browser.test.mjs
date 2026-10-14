@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {FinalPortal} from '../final-portal.mjs';
+import {validatePolyPdf,validatePortalErrorPdf} from '../poly-pdf.mjs';
 import {POLY_ORIGIN,PREFIX as p} from '../poly-schema.mjs';
 
 const form=body=>`<!doctype html><meta charset="utf-8"><form method="post">${body}</form>`;
@@ -48,10 +49,11 @@ test('Final portal uses only observed controls, separates waiting/unknown, handl
     await f.portal.page.locator('#'+p+'FinalPrint a').evaluate(el=>el.setAttribute('href','/PostMatric/FinalDisclaimer.aspx'));
     const result=await f.portal.finalPdf();assert.equal(result.kind,'pdf');assert.equal(result.pages,1);assert.equal(f.posts(),0);
   });
-  await t.test('Observed official server error is reported without creating a blank PDF',async()=>{
+  await t.test('Requested error-page print produces a readable diagnostic PDF, never a valid application',async()=>{
     const f=await fixture({locked:true,print:true,portalError:true});
     await f.portal.page.locator('#'+p+'FinalPrint a').evaluate(el=>el.setAttribute('href','/PostMatric/FinalDisclaimer.aspx'));
-    const result=await f.portal.finalPdf();assert.equal(result.kind,'print-unavailable');assert.match(result.message,/AboutMotherFather/);assert.equal(result.bytes,undefined);assert.equal(f.posts(),0);
+    const result=await f.portal.finalPdf();assert.equal(result.kind,'print-error-pdf');assert.equal(result.pages,1);assert.equal(f.posts(),0);
+    await validatePortalErrorPdf(result.bytes);await assert.rejects(validatePolyPdf(result.bytes,'000012345678'));
   });
   await t.test('Disclaimer cannot redirect to an unmapped destination',async()=>{
     const f=await fixture({locked:true,print:true,badRedirect:true});

@@ -26,7 +26,7 @@ export function projectResult(result) {
   const clean={kind:result.kind};
   if(result.kind==='pdf') {
     if(typeof result.pdf!=='string'||result.pdf.length>23*1024*1024||!/^[A-Za-z0-9+/]*={0,2}$/.test(result.pdf)||Buffer.from(result.pdf,'base64').subarray(0,5).toString()!=='%PDF-') throw Error('Invalid saved PDF.');
-    clean.pdf=result.pdf;return clean;
+    clean.pdf=result.pdf;if(result.incomplete===true)clean.incomplete=true;return clean;
   }
   for(const key of ['registration','password']) if(result[key]!==undefined) {
     if(typeof result[key]!=='string' || result[key].length>2000) throw new Error('Invalid saved result.');
