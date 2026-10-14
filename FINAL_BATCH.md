@@ -27,6 +27,8 @@ Admin-only, private-chat printing for up to 100 candidates. This workflow cannot
 
 PDF delivery failure pauses the batch. `/retry` reuses the same saved PDF without login, printing or locking again. If Telegram accepted a document but its acknowledgement was lost, retry can deliver another copy of that same PDF. A skipped delivery retains its L ID in the report.
 
+Final Print failures include a fixed diagnostic code (`FINAL-STATUS`, `FINAL-LINK`, `FINAL-NAVIGATION`, `FINAL-PAGE`, `FINAL-IDENTITY`, `FINAL-RENDER` or `FINAL-VALIDATION`). This identifies the failed operation without recording applicant values or raw portal exceptions. Successful login followed by a PDF failure must not be described as an invalid registration or CAPTCHA.
+
 Uploads and pending answers are held in memory, never saved to disk or activity logs. Logs record module/action/stage/outcome only. A completed PDF and its application identity are stored using the existing encrypted saved-session system. Cancellation, access revocation, 20-minute inactivity or shutdown clears pending data and closes the browser. On restart there is no automatic batch resume: upload only the remaining rows. Exactly one admin batch is possible; group chats and non-admin uploads are rejected before download.
 
 ## Local configuration

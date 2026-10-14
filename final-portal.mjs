@@ -1,6 +1,7 @@
 import {PolyPortal} from './poly-portal.mjs';
 import {POLY_ORIGIN,PREFIX} from './poly-schema.mjs';
 import {validatePolyPdf,validatePortalErrorPdf,PORTAL_PRINT_ERROR} from './poly-pdf.mjs';
+import {finalError} from './final-errors.mjs';
 
 // Dashboard selectors come from the supplied official page. No row indexes are used.
 export function readFinalStatus() {
@@ -90,7 +91,10 @@ export class FinalPortal extends PolyPortal {
     } finally {this.lockInFlight=false;this.approvedDialog=undefined;this.page.off('request',count);}
   }
   async finalPdf() {
-    const status=await this.read();if(status.kind!=='print-ready') throw Error('Institution print is not available.');
+    let failureCode='FINAL-STATUS';
+    try {
+    const status=await this.read();if(status.kind!=='print-ready') throw Object.assign(Error('Institution print is not available.'),{code:failureCode});
+    failureCode='FINAL-LINK';
     const state=await this.page.evaluate(readFinalStatus),url=new URL(state.print.href);
     if(url.origin!==POLY_ORIGIN||!/^\/postmatric(?:renewal)?\/[a-z0-9_]+\.aspx$/i.test(url.pathname)||/tempprint/i.test(url.pathname)||!/संस्था.*प्रिंट|institution.*print|final.*print/i.test(state.print.text)) throw Error('Unsupported final print destination.');
     this.paths.add(url.pathname.toLowerCase());
@@ -98,18 +102,23 @@ export class FinalPortal extends PolyPortal {
     // Permit only that mapped transition; other redirects remain blocked.
     const printPath=url.pathname.toLowerCase()==='/postmatric/finaldisclaimer.aspx'?'/postmatric/finalprintinstitute.aspx':url.pathname.toLowerCase();
     this.paths.add(printPath);
+    failureCode='FINAL-NAVIGATION';
     await this.page.goto(url.href,{waitUntil:'domcontentloaded'});
+    failureCode='FINAL-PAGE';
     const s=await this.snapshot();
     if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==printPath) throw Error('Final print destination is not verified.');
     if(PORTAL_PRINT_ERROR.test(s.text)) {
       // User requested the page print even on a portal failure. Keep it explicitly
       // separate from a validated final application; do not manufacture missing fields.
-      const bytes=await this.printPage();const result=await validatePortalErrorPdf(bytes);
+      failureCode='FINAL-RENDER';const bytes=await this.printPage();
+      failureCode='FINAL-VALIDATION';const result=await validatePortalErrorPdf(bytes);
       return {kind:'print-error-pdf',bytes,pages:result.pages};
     }
+    failureCode='FINAL-IDENTITY';
     if(!s.text.replaceAll(/\s/g,'').includes(this.registration)||/जाँच हेतु आवेदन|जांच हेतु आवेदन|check.print/i.test(s.text)) throw Error('Final print identity or content is not verified.');
     const native=s.links.find(l=>/\.pdf(?:[?#]|$)/i.test(l.href)&&new URL(l.href).origin===POLY_ORIGIN);
     let bytes;
+    failureCode='FINAL-RENDER';
     if(native) {
       this.nativePdfUrl=native.href;
       const [download]=await Promise.all([this.page.waitForEvent('download'),this.page.getByRole('link',{name:native.text,exact:true}).click()]);
@@ -119,7 +128,9 @@ export class FinalPortal extends PolyPortal {
     } else {
       bytes=await this.printPage();
     }
+    failureCode='FINAL-VALIDATION';
     const result=await validatePolyPdf(bytes,this.registration);return {kind:'pdf',bytes,pages:result.pages};
+    } catch(error) {if(error.code===failureCode)throw error;throw finalError(failureCode);}
   }
   async printPage() {
     // The official PRINT THIS PAGE button calls window.print(). Headless PDF uses

@@ -3,11 +3,13 @@ import {createReadStream} from 'node:fs';
 import {createInterface} from 'node:readline';
 import {resolve,join} from 'node:path';
 import {telegramUserId} from './access.mjs';
+import {FINAL_ERROR_CODES} from './final-errors.mjs';
 
 // A closed vocabulary prevents submitted values, portal text and exception
 // messages from becoming persistent logs, even if a caller passes extra keys.
 export const LOG_COMMANDS=new Set(['/finaltemplate','/finalbatch','/batchstatus','/skip','/test','/start','/menu','/id','/help','/cancel','/otr','/boards','/retry','/refresh','/resend','/result','/search','/next','/adduser','/removeuser','/users','/admin','/log','/save','/dsave','/psave','/reuse','/edit']);
 const vocabulary={
+  code:FINAL_ERROR_CODES,
   event:new Set(['message','handled','denied','ignored','access_changed','session_expired','portal_started','portal_result','portal_error','bot_started','bot_ready','bot_stopped','system_error','log_viewed','log_exported','session_saved','session_viewed','session_reused','save_failed']),
   module:new Set(['final-batch','system','menu','otr-menu','password','otr','registration','poly','final','none']),
   action:new Set([...LOG_COMMANDS,'answer','confirm','choose-password','choose-otr','choose-recovery','choose-registration','back','unknown-command','unsupported-message','upload','open','submit','refresh','resend','grant','revoke','polling','webhook','login','choose','fill','pdf','home','edit','read','captcha','refreshLogin','lock','finalPdf']),
@@ -128,7 +130,7 @@ export class ActivityLog {
 
 export function formatActivity(entry) {
   return `${displayFormat.format(new Date(entry.time))} IST | ${entry.userId ? `User ${entry.userId}`:'System'} | ${[
-    entry.module,entry.event.replaceAll('_',' '),entry.action,entry.field && `field:${entry.field}`,entry.phase && `stage:${entry.phase}`,entry.stage,entry.result,entry.reason && `reason:${entry.reason}`,entry.targetUserId && `target:${entry.targetUserId}`,entry.httpStatus && `HTTP ${entry.httpStatus}`,
+    entry.module,entry.event.replaceAll('_',' '),entry.action,entry.field && `field:${entry.field}`,entry.phase && `stage:${entry.phase}`,entry.stage,entry.result,entry.code,entry.reason && `reason:${entry.reason}`,entry.targetUserId && `target:${entry.targetUserId}`,entry.httpStatus && `HTTP ${entry.httpStatus}`,
   ].filter(Boolean).join(' | ')}`;
 }
 

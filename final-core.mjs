@@ -1,4 +1,5 @@
 import {normalizePoly} from './poly-schema.mjs';
+import {finalErrorCode,finalErrorNotice} from './final-errors.mjs';
 
 const keyboard=rows=>({reply_markup:{keyboard:rows,resize_keyboard:true,one_time_keyboard:true}});
 export class FinalBot {
@@ -19,7 +20,7 @@ export class FinalBot {
       const result=await Promise.race([s.portal[method](...args),new Promise((_,reject)=>{timer=setTimeout(()=>{void s.portal.close();reject(Error('timeout'));},this.timeoutMs);})]);
       if(this.sessions.get(id)!==s||!this.canUse(id)) throw Error('Session closed');
       await this.activity?.record({event:'portal_result',module:'final',userId:id,action:method,result:result?.kind});return result;
-    } catch {await this.activity?.record({event:'portal_error',module:'final',userId:id,action:method,result:'failed'});throw Error('Portal operation stopped');}
+    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation stopped'),{code});}
     finally {clearTimeout(timer);}
   }
   fields(s) {return {registration:{value:s.credentials.registration},otr:{value:s.credentials.otr},applicationType:{value:s.applicationType}};}
@@ -115,8 +116,9 @@ export class FinalBot {
       }
       if(s.phase==='confirm') return /^yes$/i.test(text)?await this.lock(id,s):await this.say(id,'Send YES only after reviewing the application, or /cancel.');
       return await this.say(id,'Use /result to retrieve an available PDF, or /start for a fresh portal status check. No lock will be repeated automatically.');
-    } catch {
+    } catch(error) {
       const uncertain=s.phase==='submitting';s.phase=s.pdf?'done':uncertain?'unknown':'blocked';delete s.credentials.password;await s.portal?.close();
+      const diagnostic=finalErrorNotice(finalErrorCode(error));if(diagnostic)await this.say(id,diagnostic);
       return await this.say(id,s.pdf?'The PDF is retained. Use /result to retry saving or delivery; locking will not be repeated.':uncertain?'The lock outcome is uncertain. Check the official portal before another attempt. No automatic retry will occur.':s.lockConfirmed?'Locking is confirmed, but final PDF generation failed. Use a fresh login through option 5 to check print availability; do not lock again.':'The operation stopped. Check the portal or local storage, then use /start for a fresh session. No automatic submission retry will occur.');
     } finally {s.busy=false;}
   }

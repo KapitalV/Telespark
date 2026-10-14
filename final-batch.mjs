@@ -1,5 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import {parseBatchWorkbook,MAX_WORKBOOK_BYTES} from './batch-workbook.mjs';
+import {finalErrorCode,finalErrorNotice} from './final-errors.mjs';
 
 const keyboard=rows=>({reply_markup:{keyboard:rows,resize_keyboard:true,one_time_keyboard:true}});
 const csvCell=value=>'"'+String(value??'').replace(/^[=+@\-\t\r]/,"'$&").replaceAll('"','""')+'"';
@@ -51,7 +52,7 @@ export class FinalBatch {
       const result=await Promise.race([portal[method](...args),new Promise((_,reject)=>{timer=setTimeout(()=>{void portal.close();reject(Error('Timeout'));},this.timeoutMs);})]);
       if(!this.alive(id,s))throw Error('Session closed');
       await this.activity?.record({event:'portal_result',module:'final-batch',userId:id,action:method,result:result?.kind});return result;
-    } catch {await this.activity?.record({event:'portal_error',module:'final-batch',userId:id,action:method,result:'failed'});throw Error('Portal operation failed');}
+    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final-batch',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation failed'),{code});}
     finally{clearTimeout(timer);}
   }
   async captcha(id,s,image) {
@@ -136,11 +137,11 @@ export class FinalBatch {
         await s.portal.close();return await this.sendPdf(id,s);
       }
       return await this.say(id,'Use /retry for the failed step, /skip for the current candidate, /batchstatus or /cancel.');
-    } catch {
+    } catch(error) {
       if(this.alive(id,s)) {
         await s.portal?.close();
         if(s.rows[s.index]?.status!=='pending') {s.phase='retry-next';await this.say(id,'Progress was retained. Send /retry to continue the next pending row or resend the completion report.');}
-        else {s.phase=s.delivery?'delivery':'retry';if(s.delivery?.pdfId)s.rows[s.index].pdfId=s.delivery.pdfId;await this.say(id,s.delivery?'PDF retained. Use /retry to resend it without login or printing again, or /skip.':'Portal operation stopped. Use /retry for a fresh login or /skip. No application was locked.',keyboard([['/retry','/skip'],['/cancel']]));}
+        else {s.phase=s.delivery?'delivery':'retry';if(s.delivery?.pdfId)s.rows[s.index].pdfId=s.delivery.pdfId;await this.say(id,s.delivery?'PDF retained. Use /retry to resend it without login or printing again, or /skip.':(finalErrorNotice(finalErrorCode(error))||'Portal operation stopped.')+' Use /retry for a fresh login or /skip. No application was locked.',keyboard([['/retry','/skip'],['/cancel']]));}
       }
     } finally{s.busy=false;}
   }
