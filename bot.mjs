@@ -20,6 +20,8 @@ import {PolyPortal} from './poly-portal.mjs';
 import {FinalBot} from './final-core.mjs';
 import {FinalPortal} from './final-portal.mjs';
 import {acquireInstanceLock} from './instance-lock.mjs';
+import {FinalBatch} from './final-batch.mjs';
+import {documentMime,downloadTelegramFile} from './telegram-files.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -60,7 +62,7 @@ class Telegram {
   upload(method, field, chatId, bytes, filename, caption, options = {}) {
     const form = new FormData();
     form.set('chat_id',String(chatId));
-    form.set(field,new Blob([bytes],{type:filename.endsWith('.pdf')?'application/pdf':filename.endsWith('.jsonl')?'application/x-ndjson':'image/png'}),filename);
+    form.set(field,new Blob([bytes],{type:documentMime(filename)}),filename);
     form.set('caption',caption);
     for (const [key,value] of Object.entries(options)) form.set(key,String(value));
     form.set('protect_content','false');
@@ -68,6 +70,7 @@ class Telegram {
   }
   photo(chatId, bytes, caption, options) { return this.upload('sendPhoto','photo',chatId,bytes,'Image.png',caption,options); }
   document(chatId, bytes, filename, caption, options) { return this.upload('sendDocument','document',chatId,bytes,filename,caption,options); }
+  download(document,maxBytes) {return downloadTelegramFile({api:this.api.bind(this),token,document,maxBytes});}
 }
 
 const telegram = new Telegram();
@@ -103,7 +106,8 @@ const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,sa
 }),activity,{userId,module:'registration'})});
 const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:()=>new PolyPortal({headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
 const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:applicationType=>new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
-const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
+const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:type=>new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
+const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
 let lastMalformedAlert = -Infinity;
 async function reportMalformed({httpStatus=400}={}) {
   await activity.record({event:'system_error',module:'system',action:'webhook',reason:'invalid-arguments',httpStatus});

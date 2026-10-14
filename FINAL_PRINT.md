@@ -2,6 +2,8 @@
 
 Main menu **5. Form lock & Final Print**. Menu item 4 opens the existing saved-session dashboard.
 
+The admin also sees **Excel batch** beside Fresh/Renewal. It processes a candidate workbook for printing only and never calls the lock operation. See [FINAL_BATCH.md](FINAL_BATCH.md) for the template, commands and safeguards.
+
 1. Choose Fresh or Renewal. The bot uses the respective official `LoginStudentPost.aspx` or `LoginStudentPostRenew.aspx` URL.
 2. Enter registration number and OTR.
 3. Choose **Use default password** or **Other**. The default comes from the local `FINAL_DEFAULT_PASSWORD` environment setting; its value is not displayed in buttons or committed to source. Other passwords are entered for that login only.

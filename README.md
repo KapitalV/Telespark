@@ -1,5 +1,7 @@
 # Telespark — UP Scholarship Telegram recovery bot
 
+**Final Print Excel batches:** The admin can upload up to 100 candidates through `/finalbatch` or **5 → Excel batch**, answer each login CAPTCHA, and receive saved PDFs sequentially. `/finaltemplate` supplies the blank workbook. Batches never lock applications. See [Excel batch instructions](FINAL_BATCH.md) for password presets, retry behavior, reports and local configuration.
+
 This personal bot asks six questions in a private Telegram chat, fills the official postmatric recovery website, sends the CAPTCHA image, and submits when you reply with its text. On success it returns the latest password and the recovery slip. It uses Node.js, Playwright, and the Telegram Bot API. No AI subscription or public server is needed to run it on your PC.
 
 To use it while your PC is off, follow [Deploy on Render](DEPLOY_RENDER.md). The included Dockerfile uses Chromium on Linux and reads secrets from the hosting environment. Free web-service hosting uses Telegram webhooks; a paid worker uses polling.

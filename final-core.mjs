@@ -8,10 +8,10 @@ export class FinalBot {
   async clear(id) {const s=this.sessions.get(id);this.sessions.delete(id);if(s){s.credentials={};s.pdf=undefined;await s.portal?.close();}}
   async expire() {for(const [id,s] of this.sessions) if(!s.busy&&this.clock()-s.updated>20*60_000) await this.clear(id);}
   async say(id,text,options) {if(!this.canUse(id))return;const message=await this.telegram.send(id,text,options);const s=this.sessions.get(id);if(s)s.promptId=message?.message_id;return message;}
-  async start(id,fields={}) {
+  async start(id,fields={},allowBatch=false) {
     await this.clear(id);if(!this.canUse(id))return;
     this.sessions.set(id,{phase:'type',credentials:{},updated:this.clock(),lastMessageId:0,reuse:fields});
-    return this.say(id,'Form lock & Final Print — choose Fresh or Renewal. The bot checks the portal status before offering a final lock. Institution print may only become available after the portal waiting period.',keyboard([['Fresh','Renewal'],['/menu']]));
+    return this.say(id,'Form lock & Final Print — choose Fresh or Renewal for one applicant.'+(allowBatch?' Choose Excel batch to print a candidate list without locking.':'')+' The bot checks the portal status before offering an individual final lock. Institution print may only become available after the portal waiting period.',keyboard([['Fresh','Renewal'],...(allowBatch?[['Excel batch']]:[]),['/menu']]));
   }
   async call(id,s,method,...args) {
     let timer;await this.activity?.record({event:'portal_started',module:'final',userId:id,action:method});

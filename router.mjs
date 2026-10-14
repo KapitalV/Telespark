@@ -4,8 +4,8 @@ import {telegramUserId} from './access.mjs';
 
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
-  constructor({telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId = '', enableOtr = false, enablePoly=false, enableFinal=false, clock = () => Date.now()}) {
-    Object.assign(this, {telegram, recovery, otr, registration, poly, final, access, activity, saves, allowedUserId:String(allowedUserId), enableOtr, enablePoly, enableFinal, clock});
+  constructor({telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId = '', enableOtr = false, enablePoly=false, enableFinal=false, clock = () => Date.now()}) {
+    Object.assign(this, {telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId:String(allowedUserId), enableOtr, enablePoly, enableFinal, clock});
     this.sessions = new Map();
     this.lastMessages = new Map();
     this.locks = new Map();
@@ -24,14 +24,14 @@ export class BotRouter {
 
   async clear(id) {
     this.sessions.delete(id);
-    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id),this.final?.clear(id)]);
+    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id),this.final?.clear(id),this.batch?.clear(id)]);
   }
 
   async expire() {
     const previous=[...this.sessions.keys()].map(id=>({id,...this.activityContext(id)}));
-    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire(),this.final?.expire()]);
+    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire(),this.final?.expire(),this.batch?.expire()]);
     for (const [id, state] of this.sessions) {
-      if (this.clock() - state.updated > 20 * 60_000 && !this.poly?.sessions.get(id)?.busy&&!this.final?.sessions.get(id)?.busy) await this.clear(id);
+      if (this.clock() - state.updated > 20 * 60_000 && !this.poly?.sessions.get(id)?.busy&&!this.final?.sessions.get(id)?.busy&&!this.batch?.sessions.get(id)?.busy) await this.clear(id);
     }
     for(const before of previous) {
       const after=this.activityContext(before.id);
@@ -50,7 +50,7 @@ export class BotRouter {
 
   activityContext(id) {
     const module=this.sessions.get(id)?.module || 'none';
-    const state=({password:this.recovery,otr:this.otr,registration:this.registration,poly:this.poly,final:this.final}[module])?.sessions?.get(id);
+    const state=({password:this.recovery,otr:this.otr,registration:this.registration,poly:this.poly,final:this.final,'final-batch':this.batch}[module])?.sessions?.get(id);
     const phase=state?.phase || (['menu','otr-menu'].includes(module)?module:'none');
     const field=module==='password'
       ? (phase==='questions'?questionAt(state.index,state.details)?.[0]:phase==='correction'?state.correction:phase==='captcha'?'captcha':undefined)
@@ -66,6 +66,16 @@ export class BotRouter {
       await this.activity?.record({event:'ignored',userId,messageId,reason:'duplicate'});return;
     }
     this.lastMessages.set(id,messageId);
+    if(message.document) {
+      await this.expire();
+      if(!this.access?.isAdmin(userId)||!this.access.canUse(userId)) {await this.activity?.record({event:'denied',userId,messageId,reason:'admin-only'});return this.telegram.send(id,'Excel batches are admin-only.');}
+      if(!this.enableFinal||!this.batch)return this.telegram.send(id,'Excel Final Print is unavailable.');
+      if(this.sessions.get(id)?.module!=='final-batch')return this.telegram.send(id,'Send /finalbatch before uploading the template.');
+      this.sessions.get(id).updated=this.clock();
+      await this.activity?.record({event:'message',userId,messageId,module:'final-batch',action:'upload'});
+      await this.batch.upload(message);
+      return this.activity?.record({event:'handled',userId,messageId,action:'upload',...this.activityContext(id)});
+    }
     if(typeof message.text!=='string' || !message.text.trim()) {
       await this.activity?.record({event:'ignored',userId,messageId,reason:'unsupported-message'});return;
     }
@@ -99,6 +109,17 @@ export class BotRouter {
       return this.telegram.send(id, 'Access is restricted. Send /id and ask the admin to add that user ID.');
     }
     if (['/adduser','/removeuser','/users','/admin','/log'].includes(command)) return this.adminCommand(message,command);
+    if(['/finaltemplate','/finalbatch','/batchstatus','/skip'].includes(command)||text==='Excel batch') {
+      if(!this.access?.isAdmin(message.from.id))return this.telegram.send(id,'Excel batches are admin-only.');
+      if(!this.enableFinal||!this.batch)return this.telegram.send(id,'Excel Final Print is unavailable.');
+      await this.expire();
+      const active=this.sessions.get(id);if(active?.module==='final-batch')active.updated=this.clock();
+      if(command==='/finaltemplate')return this.batch.template(id);
+      if(command==='/batchstatus')return this.batch.status(id);
+      if(command==='/skip')return this.batch.handle(message);
+      if(this.batch.sessions.has(id)&&this.batch.sessions.get(id).phase!=='done')return this.batch.start(id);
+      await this.clear(id);this.sessions.set(id,{module:'final-batch',updated:this.clock()});return this.batch.start(id);
+    }
     if (command === '/test') {
       const valid=text.split(/\s+/).length===1;
       await this.activity?.record({event:valid?'handled':'system_error',module:'system',action:'/test',userId:message.from.id,httpStatus:valid?200:400,...(valid?{}:{reason:'invalid-arguments'})});
@@ -129,7 +150,7 @@ export class BotRouter {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/test — bot receipt check (does not submit to portal)\n/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
+    if (command === '/help') return this.telegram.send(id, '/test — bot receipt check (does not submit to portal)\n/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/finaltemplate — Excel template\n/finalbatch — upload Final Print list\n/batchstatus — batch progress\n/skip — skip current batch candidate\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();
@@ -137,7 +158,7 @@ export class BotRouter {
       if(/^4(?:\.|$)/.test(text)) return this.saves?this.saves.dashboard(id):this.telegram.send(id,'Saved sessions are unavailable.');
       if(/^5(?:\.|$)/.test(text)) {
         if(!this.enableFinal||!this.final) return this.telegram.send(id,'Form lock & Final Print is disabled.');
-        state.module='final';return this.final.start(id);
+        state.module='final';return this.final.start(id,{},this.batch&&this.access?.isAdmin(id));
       }
       if(/^3(?:\.|$)/.test(text)) {
         if(!this.enablePoly||!this.poly) return this.telegram.send(id,'OTNew-Poly is disabled pending live validation. Existing modules remain available.');
@@ -169,6 +190,7 @@ export class BotRouter {
     if (state.module === 'password') return this.recovery.handle(message);
     if (state.module === 'poly') return this.poly.handle(message);
     if (state.module === 'final') return this.final.handle(message);
+    if (state.module === 'final-batch') return this.batch.handle(message);
     if (state.module === 'registration') return this.registration.handle(message);
     return this.otr.handle(message);
   }

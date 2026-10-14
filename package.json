@@ -14,7 +14,11 @@
     "install-browser": "playwright install chromium"
   },
   "dependencies": {
+    "exceljs": "4.4.0",
     "pdfjs-dist": "4.10.38",
     "playwright": "1.64.0"
+  },
+  "overrides": {
+    "exceljs": {"uuid": "11.1.1"}
   }
 }
