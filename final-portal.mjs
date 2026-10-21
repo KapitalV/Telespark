@@ -1,7 +1,8 @@
 import {PolyPortal} from './poly-portal.mjs';
 import {POLY_ORIGIN,PREFIX} from './poly-schema.mjs';
 import {validatePolyPdf,validatePortalErrorPdf,PORTAL_PRINT_ERROR} from './poly-pdf.mjs';
-import {finalError} from './final-errors.mjs';
+import {finalError,finalErrorCode} from './final-errors.mjs';
+import {setTimeout as delay} from 'node:timers/promises';
 
 // Dashboard selectors come from the supplied official page. No row indexes are used.
 export function readFinalStatus() {
@@ -35,13 +36,25 @@ export class FinalPortal extends PolyPortal {
   async open() {
     const image=await super.open();
     this.page.removeAllListeners('dialog');
-    this.page.on('dialog',async dialog=>{
+    const page=this.page;
+    page.on('dialog',dialog=>this.handleDialog(dialog,page));
+    return image;
+  }
+  async handleDialog(dialog,page) {
+      const printing=this.printDialogs;
+      if(printing&&printing.pages.has(page)) {
+        const url=new URL(page.url());
+        const permitted=url.origin===POLY_ORIGIN&&printing.paths.has(url.pathname.toLowerCase());
+        if(permitted&&['alert','confirm'].includes(dialog.type())&&++printing.count<=3) {
+          await dialog.accept().catch(()=>{printing.rejected=true;});return;
+        }
+        printing.rejected=true;
+        await dialog.dismiss().catch(()=>{});return;
+      }
       if(this.lockInFlight&&dialog.type()==='confirm'&&this.approvedDialog===dialog.message()) {this.approvedDialog=undefined;await dialog.accept();return;}
       if(this.lockInFlight&&dialog.type()==='confirm') this.pendingDialog=dialog.message();
       else this.dialog=/captcha|कैप्चा/i.test(dialog.message())&&/invalid|incorrect|wrong|गलत|अमान्य/i.test(dialog.message())?'captcha':'unknown';
       await dialog.dismiss().catch(()=>{});
-    });
-    return image;
   }
   async login(credentials) {
     // Do not toggle an unobserved radio by its numeric position on Renewal.
@@ -100,13 +113,17 @@ export class FinalPortal extends PolyPortal {
     this.paths.add(url.pathname.toLowerCase());
     // Observed Fresh flow redirects from the dashboard's disclaimer link to this print page.
     // Permit only that mapped transition; other redirects remain blocked.
-    const printPath=url.pathname.toLowerCase()==='/postmatric/finaldisclaimer.aspx'?'/postmatric/finalprintinstitute.aspx':url.pathname.toLowerCase();
+    const printPath=/^\/postmatric(?:renewal)?\/finaldisclaimer\.aspx$/i.test(url.pathname)?url.pathname.toLowerCase().replace('/finaldisclaimer.aspx','/finalprintinstitute.aspx'):url.pathname.toLowerCase();
     this.paths.add(printPath);
+    // Observed for the failing batch candidate after opening the final link.
+    // This path may produce only an INCOMPLETE error printout, never a valid PDF.
+    this.paths.add('/errorpage.aspx');
     failureCode='FINAL-NAVIGATION';
-    await this.page.goto(url.href,{waitUntil:'domcontentloaded'});
+    await this.openFinalPrint(state.print,printPath);
     failureCode='FINAL-PAGE';
     const s=await this.snapshot();
-    if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==printPath) throw Error('Final print destination is not verified.');
+    const arrivedPath=new URL(s.url).pathname.toLowerCase();
+    if(!this.safe(s)||![printPath,'/errorpage.aspx'].includes(arrivedPath)) throw Error('Final print destination is not verified.');
     if(PORTAL_PRINT_ERROR.test(s.text)) {
       // User requested the page print even on a portal failure. Keep it explicitly
       // separate from a validated final application; do not manufacture missing fields.
@@ -114,6 +131,7 @@ export class FinalPortal extends PolyPortal {
       failureCode='FINAL-VALIDATION';const result=await validatePortalErrorPdf(bytes);
       return {kind:'print-error-pdf',bytes,pages:result.pages};
     }
+    if(arrivedPath==='/errorpage.aspx'||this.dialog==='unknown')throw finalError('FINAL-PAGE');
     failureCode='FINAL-IDENTITY';
     if(!s.text.replaceAll(/\s/g,'').includes(this.registration)||/जाँच हेतु आवेदन|जांच हेतु आवेदन|check.print/i.test(s.text)) throw Error('Final print identity or content is not verified.');
     const native=s.links.find(l=>/\.pdf(?:[?#]|$)/i.test(l.href)&&new URL(l.href).origin===POLY_ORIGIN);
@@ -130,7 +148,64 @@ export class FinalPortal extends PolyPortal {
     }
     failureCode='FINAL-VALIDATION';
     const result=await validatePolyPdf(bytes,this.registration);return {kind:'pdf',bytes,pages:result.pages};
-    } catch(error) {if(error.code===failureCode)throw error;throw finalError(failureCode);}
+    } catch(error) {
+      const result=finalErrorCode(error)?error:finalError(failureCode);
+      if(result.code==='FINAL-PAGE') {
+        // Keep this image in memory for the same user's diagnostic reply. Never
+        // write portal contents to logs or save a rejected page as a valid PDF.
+        try {if(new URL(this.page.url()).origin===POLY_ORIGIN)result.image=await this.page.screenshot({fullPage:false,timeout:5000});}catch{}
+      }
+      throw result;
+    }
+  }
+  async openFinalPrint(link,printPath) {
+    const dashboard=this.page,popups=[];
+    // Optional OK dialogs belong only to this verified print navigation. Lock
+    // confirmations retain their separate exact-warning review above.
+    const printing={pages:new Set([dashboard]),paths:new Set([
+      new URL(dashboard.url()).pathname.toLowerCase(),
+      new URL(link.href).pathname.toLowerCase(),printPath,'/errorpage.aspx'
+    ]),count:0,rejected:false};
+    const watch=page=>{
+      popups.push(page);
+      printing.pages.add(page);
+      page.on('dialog',dialog=>this.handleDialog(dialog,page));
+    };
+    const printOnly=async route=>{
+      if(route.request().method()==='POST') {this.printPostBlocked=true;return route.abort();}
+      return route.fallback();
+    };
+    this.context.on('page',watch);
+    await this.context.route('**/*',printOnly);
+    try {
+      const container=dashboard.locator('#ContentPlaceHolder1_FinalPrint');
+      const anchor=await container.evaluate(e=>e.matches('a'))?container:container.locator('a[href]').first();
+      if(await anchor.evaluate(e=>e.href)!==link.href)throw finalError('FINAL-LINK');
+      this.printPostBlocked=false;this.printDialogs=printing;
+      // Clicking preserves the portal's referrer and target behavior. No form is
+      // submitted, and the normal origin/path route guard remains active.
+      await anchor.click({timeout:15000});
+      const deadline=Date.now()+(this.printTransitionTimeoutMs??15000);
+      while(Date.now()<deadline) {
+        if(this.externalBlocked||this.printPostBlocked||printing.rejected||popups.length>1)throw finalError('FINAL-PAGE');
+        const page=popups[0]||dashboard;
+        try {
+          const url=new URL(page.url());
+          if(url.origin===POLY_ORIGIN&&[printPath,'/errorpage.aspx'].includes(url.pathname.toLowerCase())) {
+            await page.waitForLoadState('domcontentloaded',{timeout:Math.max(1,deadline-Date.now())});
+            if(printing.rejected||this.externalBlocked||this.printPostBlocked)throw finalError('FINAL-PAGE');
+            this.page=page;return;
+          }
+          if(url.origin===POLY_ORIGIN&&url.pathname.toLowerCase()===this.loginPath.toLowerCase())throw finalError('FINAL-PAGE');
+        } catch(error) {if(error.code)throw error;}
+        await delay(100);
+      }
+      throw finalError('FINAL-PAGE');
+    } finally {
+      this.printDialogs=undefined;
+      this.context.off('page',watch);
+      await this.context.unroute('**/*',printOnly);
+    }
   }
   async printPage() {
     // The official PRINT THIS PAGE button calls window.print(). Headless PDF uses

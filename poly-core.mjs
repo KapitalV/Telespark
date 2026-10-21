@@ -1,8 +1,9 @@
-import {POLY_FIELDS,POLY_SECTIONS,normalizePoly} from './poly-schema.mjs';
+import {POLY_SECTIONS,normalizePoly} from './poly-schema.mjs';
+import {SAVED_POLY_FIELDS} from './saved-schema.mjs';
 
 const operations={'1':'fill','2':'certificates','3':'pdf'};
 const keyboard=rows=>({reply_markup:{keyboard:rows,resize_keyboard:true,one_time_keyboard:true}});
-const loginFields=[{key:'registration',label:'Registration number',type:'digits'},{key:'otr',label:'OTR number',type:'text'},{key:'password',label:'Existing portal password (temporary; never saved)',type:'text'}];
+const loginFields=[{key:'registration',label:'Registration number',type:'digits'},{key:'otr',label:'OTR number',type:'text'},{key:'password',label:'Portal password',type:'text'}];
 export class PolyBot {
   constructor({telegram,portalFactory,store,canUse=()=>false,clock=()=>Date.now(),activity,timeoutMs=75_000}) {Object.assign(this,{telegram,portalFactory,store,canUse,clock,activity,timeoutMs});this.sessions=new Map();}
   async call(s,method,...args) {
@@ -18,15 +19,30 @@ export class PolyBot {
   async clear(id) {const s=this.sessions.get(id);this.sessions.delete(id);if(s) {s.credentials={};s.reuse={};s.result=undefined;await s.portal?.close();}}
   async expire() {for(const [id,s] of this.sessions) if(!s.busy&&this.clock()-s.updated>20*60_000) await this.clear(id);}
   async say(id,text,options) {if(!this.canUse(id)) return;const reply=await this.telegram.send(id,text,options);const s=this.sessions.get(id);if(s&&reply?.message_id) s.promptId=reply.message_id;return reply;}
-  async start(id,fields={}) {
+  async start(id,fields={},context={}) {
     await this.clear(id);if(!this.canUse(id)) return;
-    this.sessions.set(id,{phase:'poly-menu',credentials:{},reuse:fields,index:0,updated:this.clock()});
-    return this.say(id,'OTNew-Poly — choose an action. Form details and check-print PDFs are saved encrypted for your user ID. Passwords, CAPTCHA answers and cookies are temporary. No final locking is performed.',keyboard([['1. Fill/continue application'],['2. Verify income and caste'],['3. Download check-print PDF'],['/menu']]));
+    const s={phase:'poly-menu',credentials:{},reuse:structuredClone(fields),index:0,updated:this.clock(),quickProfile:context.quickProfile===true};
+    this.sessions.set(id,s);
+    if(context.quickProfile&&['fill','certificates','pdf'].includes(context.operation)) {
+      s.operation=context.operation;
+      if(['Fresh','Renewal'].includes(context.applicationType)) {
+        s.applicationType=context.applicationType;
+        if(['obc','sc-st-general'].includes(context.categoryRoute)) {
+          s.categoryRoute=context.categoryRoute;s.phase='login';
+          return this.loginPrompt(id,s);
+        }
+        s.phase='category';return this.say(id,'Choose the form-filling route.',keyboard([['1. SC / ST / General'],['2. OBC'],['/cancel']]));
+      }
+      s.phase='type';return this.say(id,'Choose Fresh or Renewal.',keyboard([['Fresh','Renewal'],['/cancel']]));
+    }
+    return this.say(id,'OTNew-Poly — choose an action. Form details and check-print PDFs are saved encrypted for your user ID. Saved-user passwords are encrypted; other entered passwords, CAPTCHA answers and cookies stay temporary. No final locking is performed.',keyboard([['1. Fill/continue application'],['2. Verify income and caste'],['3. Download check-print PDF'],['/menu']]));
   }
   savedFields(s) {
     const fields={};for(const key of ['registration','otr']) if(s.credentials[key]) fields[key]={value:s.credentials[key]};
+    if(s.applicationType) fields.applicationType={value:s.applicationType};
+    if(s.categoryRoute) fields.categoryRoute={value:s.categoryRoute};
     if(s.operation) fields.operation={value:s.operation};if(s.step?.stage) fields.status={value:s.step.stage};
-    for(const [key,answer] of s.portal?.answers||[]) if(Object.hasOwn(POLY_FIELDS,key)) fields[key]={value:answer.value,label:answer.display};
+    for(const [key,answer] of s.portal?.answers||[]) if(Object.hasOwn(SAVED_POLY_FIELDS,key)) fields[key]={value:answer.value,label:answer.display};
     if(s.portal?.ifsc) fields.ifsc={value:s.portal.ifsc};return fields;
   }
   async checkpoint(id,{ready=false}={}) {
@@ -37,8 +53,28 @@ export class PolyBot {
     const record=await this.store.save({id:s.savedId,userId:id,module:'poly',fields:this.savedFields(s),ready});s.savedId=record.id;return record.id;
   }
   async loginPrompt(id,s) {
+    while(s.quickProfile&&s.index<loginFields.length) {
+      const field=loginFields[s.index],saved=s.reuse[field.key]?.value;
+      if(!saved) break;
+      try {s.credentials[field.key]=normalizePoly(field,saved);s.index++;}
+      catch {break;}
+    }
+    if(s.index===loginFields.length) return this.openLogin(id,s);
     const field=loginFields[s.index],saved=s.reuse[field.key]?.value;
-    return this.say(id,field.label+(saved?'\nSaved: '+saved+'\nSend USE SAVED or enter another value.':''),saved?keyboard([['USE SAVED'],['/cancel']]):undefined);
+    return this.say(id,field.label+(saved?(field.key==='password'?'\nAn encrypted saved password is available. Send USE SAVED or enter another value.':'\nSaved: '+saved+'\nSend USE SAVED or enter another value.'):''),saved?keyboard([['USE SAVED'],['/cancel']]):undefined);
+  }
+  async openLogin(id,s) {
+    try {
+      s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType,s.categoryRoute);
+      const image=await this.call(s,'open');
+      if(this.sessions.get(id)!==s||!this.canUse(id)) {await s.portal.close();return;}
+      s.phase='login-captcha';
+      const reply=await this.telegram.photo(id,image,'Login CAPTCHA: enter the characters shown. /refresh replaces the image.');
+      s.promptId=reply?.message_id;
+    } catch {
+      s.phase='blocked';delete s.credentials.password;delete s.reuse.password;await s.portal?.close();
+      return this.say(id,'Could not prepare the login CAPTCHA. Use your saved-user command to start a fresh login, or /cancel.');
+    }
   }
   async continueTo(id,s,operation) {
     s.phase='preparing';s.operation=operation;
@@ -52,6 +88,18 @@ export class PolyBot {
     s.step=step;s.updated=this.clock();s.options=undefined;
     if(step.kind==='dashboard') {s.phase='loading';return this.prompt(id,s,await this.call(s,'choose',s.operation));}
     if(step.kind==='field') {
+      const key=step.stage+':'+step.field.key;
+      s.autoDefaultAttempted??=new Set();
+      if(step.field.autoDefault&&step.field.suggestion!==undefined&&s.manualEditKey!==step.field.key&&!s.autoDefaultAttempted.has(key)) {
+        // A discarded default must become a normal question, not another
+        // automatic postback loop. Deliberate /edit can re-enable dependents.
+        s.autoDefaultAttempted.add(key);s.phase='loading';
+        if(s.autoDefaultNoticeStage!==step.stage) {
+          s.autoDefaultNoticeStage=step.stage;
+          await this.say(id,'Applying fixed defaults for '+step.stage+'. They will be shown in review; use /edit there to change them.');
+        }
+        return this.prompt(id,s,await this.call(s,'fill',step.field,step.field.suggestion,step.token));
+      }
       s.phase='questions';s.search='';s.page=0;return this.fieldPrompt(id,s);
     }
     if(step.kind==='review') {
@@ -102,7 +150,7 @@ export class PolyBot {
       return this.say(id,`${f.label}${suggested?'\nDefault: '+suggested:''}\nChoose a listed option. /search words filters the list; /next shows more.`,keyboard(rows));
     }
     const saved=s.reuse[f.key]?.value;
-    return this.say(id,`${f.label}${f.suggestion!==undefined?'\nDefault: '+f.suggestion:''}${saved?'\nSaved: '+saved:''}\nEnter the value${f.suggestion!==undefined?' or send USE DEFAULT':''}${saved?' or USE SAVED':''}.`,keyboard([...(f.suggestion!==undefined?[['USE DEFAULT']]:[]),...(saved?[['USE SAVED']]:[]),['/cancel']]));
+    return this.say(id,`${f.label}${f.note?'\n'+f.note:''}${f.suggestion!==undefined?'\nDefault: '+f.suggestion:''}${saved?'\nSaved: '+saved:''}\nEnter the value${f.suggestion!==undefined?' or send USE DEFAULT':''}${saved?' or USE SAVED':''}.`,keyboard([...(f.suggestion!==undefined?[['USE DEFAULT']]:[]),...(saved?[['USE SAVED']]:[]),['/cancel']]));
   }
   async persistPdf(id,s) {
     if(s.pdfPersisted) return;
@@ -149,16 +197,32 @@ export class PolyBot {
         const operation=operations[text[0]];if(!operation) return await this.say(id,'Choose 1, 2 or 3.');s.operation=operation;
         if(s.phase==='done'&&!s.portal.closed) {await this.call(s,'home');return await this.prompt(id,s,await this.call(s,'choose',operation));}
         if(s.phase==='done') {s.reuse={...s.reuse,...this.savedFields(s)};s.result=undefined;s.pdfFields=undefined;s.pdfPersisted=false;s.savedId=undefined;s.terminalRecord=false;s.pendingOutcome=undefined;s.step=undefined;s.certificatesConfirmed=false;}
-        s.index=0;s.phase='login';return await this.loginPrompt(id,s);
+        s.applicationType=undefined;s.categoryRoute=undefined;s.credentials={};s.autoDefaultAttempted=new Set();s.manualEditKey=undefined;s.autoDefaultNoticeStage=undefined;s.phase='type';
+        const previous=s.reuse.applicationType?.value;
+        return await this.say(id,'Choose Fresh or Renewal for this application.'+(['Fresh','Renewal'].includes(previous)?'\nPreviously saved: '+previous+'. Choose the type for this login.':''),keyboard([['Fresh','Renewal'],['/cancel']]));
+      }
+      if(s.phase==='type') {
+        const type=/^fresh$/i.test(text)?'Fresh':/^renewal$/i.test(text)?'Renewal':undefined;
+        if(!type) return await this.say(id,'Choose Fresh or Renewal.',keyboard([['Fresh','Renewal'],['/cancel']]));
+        s.applicationType=type;s.phase='category';
+        const previous=s.reuse.categoryRoute?.value;
+        return await this.say(id,'Choose the form-filling route. This does not change the category registered on the portal.'+(previous?'\nSaved route: '+(previous==='obc'?'OBC':'SC / ST / General'):'')+'\nOBC starts from the existing structure; different fields will pause for mapping.',keyboard([['1. SC / ST / General'],['2. OBC'],['/cancel']]));
+      }
+      if(s.phase==='category') {
+        const route=/^(?:1(?:\. SC \/ ST \/ General)?|SC\s*\/\s*ST\s*\/\s*General)$/i.test(text)?'sc-st-general':/^(?:2(?:\. OBC)?|OBC)$/i.test(text)?'obc':undefined;
+        if(!route) return await this.say(id,'Choose 1. SC / ST / General or 2. OBC.',keyboard([['1. SC / ST / General'],['2. OBC'],['/cancel']]));
+        if(route!==(s.reuse.categoryRoute?.value||'sc-st-general')) {
+          // Identity remains reusable; answers from another route need fresh review.
+          s.reuse=Object.fromEntries(Object.entries(s.reuse).filter(([key])=>['registration','otr','password','profileSuffix','applicationType'].includes(key)));
+        }
+        s.categoryRoute=route;s.credentials={};s.index=0;s.phase='login';return await this.loginPrompt(id,s);
       }
       if(s.phase==='login') {
         if(text.startsWith('/')) return await this.say(id,'Enter the requested login field, or use /menu or /cancel.');
         const field=loginFields[s.index],input=text==='USE SAVED'?s.reuse[field.key]?.value:text;
         let value;try {value=normalizePoly(field,input||'');} catch(error) {return await this.say(id,error.message);}
         s.credentials[field.key]=value;s.index++;
-        if(s.index<loginFields.length) return await this.loginPrompt(id,s);
-        s.phase='loading';await s.portal?.close();s.portal=this.portalFactory();const image=await this.call(s,'open');s.phase='login-captcha';
-        if(!this.canUse(id)) return await this.clear(id);const reply=await this.telegram.photo(id,image,'Login CAPTCHA: enter the characters shown. /refresh replaces the image.');s.promptId=reply?.message_id;return;
+        return await this.loginPrompt(id,s);
       }
       if(command==='/refresh'&&['captcha','login-captcha'].includes(s.phase)) {
         const image=s.phase==='login-captcha'?await this.call(s,'refreshLogin'):await this.call(s,'captcha',true);
@@ -166,7 +230,7 @@ export class PolyBot {
       }
       if(s.phase==='login-captcha') {
         if(text.startsWith('/')) return await this.say(id,'Enter the current CAPTCHA or /refresh.');
-        let next;try {next=await this.call(s,'login',{...s.credentials,captcha:text});} finally {delete s.credentials.password;}
+        let next;try {next=await this.call(s,'login',{...s.credentials,captcha:text});} finally {delete s.credentials.password;delete s.reuse.password;s.quickProfile=false;}
         if(next.kind==='login-error') {s.phase='login';s.index=2;return await this.say(id,'Login was not accepted. Re-enter the existing password; a fresh CAPTCHA will be requested.');}
         return await this.prompt(id,s,next);
       }
@@ -181,12 +245,22 @@ export class PolyBot {
         else if(text==='USE SAVED') value=s.reuse[f.key]?.value;
         else if(s.options) {const numbered=/^(\d+)(?:\.|$)/.exec(text);if(numbered) value=s.options[Number(numbered[1])-1]?.value;}
         try {value=normalizePoly(f,value||'',s.portal.values());} catch(error) {return await this.say(id,error.message);}
+        if(s.manualEditKey===f.key) s.manualEditKey=undefined;
+        // Once the user answers, a later portal reset must not replace their
+        // choice with the fixed default (including after an explicit /edit).
+        if(f.autoDefault) {s.autoDefaultAttempted??=new Set();s.autoDefaultAttempted.add(s.step.stage+':'+f.key);}
         return await this.prompt(id,s,await this.call(s,'fill',f,value,s.step.token));
       }
       if(s.phase==='confirm'&&command==='/edit') {
-        const fields=POLY_SECTIONS[s.step.stage].fields.filter(f=>!f.computed);s.editFields=fields;s.phase='edit';return await this.lines(id,['Choose the field number to correct:',...fields.map((f,i)=>`${i+1}. ${f.label}`)]);
+        const fields=(s.portal.sections||POLY_SECTIONS)[s.step.stage].fields.filter(f=>!f.computed);s.editFields=fields;s.phase='edit';return await this.lines(id,['Choose the field number to correct:',...fields.map((f,i)=>`${i+1}. ${f.label}`)]);
       }
-      if(s.phase==='edit') {const f=s.editFields[Number(text)-1];if(!f) return await this.say(id,'Enter a field number from the list.');return await this.prompt(id,s,await this.call(s,'edit',f.key));}
+      if(s.phase==='edit') {
+        const index=Number(text)-1,f=s.editFields[index];if(!f) return await this.say(id,'Enter a field number from the list.');
+        s.manualEditKey=f.key;
+        const fields=(s.portal.sections||POLY_SECTIONS)[s.step.stage].fields,from=fields.findIndex(field=>field.key===f.key);
+        for(const field of fields.slice(from)) s.autoDefaultAttempted?.delete(s.step.stage+':'+field.key);
+        return await this.prompt(id,s,await this.call(s,'edit',f.key));
+      }
       if(s.phase==='confirm'&&['YES','CONFIRM'].includes(text.toUpperCase())) {s.phase='captcha';return await this.showCaptcha(id,s);}
       if(s.phase==='record') {
         if(text.toUpperCase()==='MISMATCH') return await this.prompt(id,s,{kind:'unsupported',message:'Certificate mismatch reported. Verification stopped. Check the certificate and application on the portal.'});

@@ -1,6 +1,7 @@
 import {LOG_COMMANDS,formatActivity} from './activity.mjs';
 import {questionAt} from './core.mjs';
 import {telegramUserId} from './access.mjs';
+import {previousInput} from './navigation.mjs';
 
 // Text reply keyboards keep polling and webhook transports message-only.
 export class BotRouter {
@@ -22,14 +23,15 @@ export class BotRouter {
     return next.finally(() => { if (this.locks.get(id) === next) this.locks.delete(id); });
   }
 
-  async clear(id) {
+  async clear(id,{keepProfile=false}={}) {
     this.sessions.delete(id);
-    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id),this.final?.clear(id),this.batch?.clear(id)]);
+    if(!keepProfile) this.saves?.clearSelectedProfile?.(id);
+    await Promise.all([this.recovery.clear(id), this.otr.clear(id), this.registration?.clear(id),this.poly?.clear(id),this.final?.clear(id),this.batch?.clear(id),this.saves?.clearUserProfile(id)]);
   }
 
   async expire() {
     const previous=[...this.sessions.keys()].map(id=>({id,...this.activityContext(id)}));
-    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire(),this.final?.expire(),this.batch?.expire()]);
+    await Promise.all([this.recovery.expire(), this.otr.expire(), this.registration?.expire(),this.poly?.expire(),this.final?.expire(),this.batch?.expire(),this.saves?.expire()]);
     for (const [id, state] of this.sessions) {
       if (this.clock() - state.updated > 20 * 60_000 && !this.poly?.sessions.get(id)?.busy&&!this.final?.sessions.get(id)?.busy&&!this.batch?.sessions.get(id)?.busy) await this.clear(id);
     }
@@ -40,12 +42,29 @@ export class BotRouter {
   }
 
   async menu(id, submenu = false) {
-    await this.clear(id);
+    await this.clear(id,{keepProfile:true});
     this.sessions.set(id, {module:submenu ? 'otr-menu' : 'menu', updated:this.clock()});
     const rows = submenu ? [['1. Recover OTR'], ['2. Scholarship registration using OTR'], ['Back']] : [['1. Password recovery'], ['2. OTR'],['3. Form filling OTNew-Poly'],['4. Saved sessions'],['5. Form lock & Final Print']];
+    const selected=this.saves?.selectedProfiles?.get(id);
+    if(selected) await this.telegram.send(id,`Selected profile: /saveuser${selected.suffix}. Available details fill automatically in your chosen service.`);
     return this.telegram.send(id, submenu ? 'OTR — recover your number or register a fresh scholarship application using an existing OTR.' : 'UP Scholarship — choose an option.\nActivity logs exclude your answers, passwords and images.'+(this.saves?'\nDetails are saved automatically before submission. /save lists saved sessions; /dsave and /psave are optional. Saved fields, passwords and results are encrypted and remain available after restart. OTPs, CAPTCHA answers and cookies are never saved. /cancel clears only the active session.':''), {
       reply_markup:{keyboard:rows, resize_keyboard:true, one_time_keyboard:true},
     });
+  }
+
+  async startWithProfile(id,module,fields,context={}) {
+    if(module==='poly'&&(!this.enablePoly||!this.poly)) return this.telegram.send(id,'OTNew-Poly is disabled; choose another service from /menu.');
+    if(module==='final'&&(!this.enableFinal||!this.final)) return this.telegram.send(id,'Form lock & Final Print is disabled; choose another service from /menu.');
+    if(['otr','registration'].includes(module)&&!this.enableOtr) return this.telegram.send(id,'OTR is disabled; choose another service from /menu.');
+    this.sessions.set(id,{module,updated:this.clock()});
+    if(module==='poly') return this.poly.start(id,fields,{...context,quickProfile:true});
+    if(module==='final') return this.final.start(id,fields,this.batch&&this.access?.isAdmin(id),{...context,quickProfile:true});
+    if(module==='password') return this.recovery.reuse(id,{registration:fields.registration});
+    if(module==='registration') return this.registration.start(id,{'ContentPlaceHolder1_TextBox3':fields.otr});
+    if(module==='otr') {
+      await this.telegram.send(id,'OTR recovery needs the registered mobile number, which this login profile does not store.');
+      return this.otr.start(id,'recover');
+    }
   }
 
   activityContext(id) {
@@ -82,6 +101,7 @@ export class BotRouter {
     const text=message.text.trim(),command=text.split(/\s/)[0].toLowerCase();
     const before=this.activityContext(id);
     let action=text.startsWith('/')?(LOG_COMMANDS.has(command)?command:'unknown-command'):'answer';
+    if(/^\/saveuser(?:\d{2})?$/.test(command)) action='/saveuser';
     if(before.module==='menu' && /^1(?:\.|$)/.test(text)) action='choose-password';
     if(before.module==='menu' && /^2(?:\.|$)/.test(text)) action='choose-otr';
     if(before.module==='otr-menu' && /^1(?:\.|$)/.test(text)) action='choose-recovery';
@@ -140,6 +160,12 @@ export class BotRouter {
       try {return await this.poly.storedResult(id,text.split(/\s+/)[1]);} catch {return this.telegram.send(id,'Saved PDF unavailable. Check the session ID and owner.');}
     }
     await this.expire();
+    if(command==='/back') return text.split(/\s+/).length===1?previousInput(this,id):this.telegram.send(id,'Send the command without arguments.');
+    if(command==='/help') return this.help(message);
+    if(this.saves?.hasUserProfile(id)) return this.saves.userProfileReply(message);
+    if(command==='/saveuser') return this.saves?this.saves.startUserProfile(id):this.telegram.send(id,'Saved sessions are unavailable in this bot build.');
+    const userProfile=/^\/saveuser(\d{2})$/.exec(command);
+    if(userProfile) return this.saves?this.saves.useUserProfile(id,userProfile[1]):this.telegram.send(id,'Saved sessions are unavailable in this bot build.');
     if(['/save','/dsave','/psave','/reuse'].includes(command)) return this.saves?this.saves.handle(message,command):this.telegram.send(id,'Saved sessions are unavailable in this bot build.');
     if (command === '/cancel') {
       await this.clear(id);
@@ -150,7 +176,6 @@ export class BotRouter {
       if (!this.enableOtr) return this.telegram.send(id, 'OTR is disabled pending testing. Password recovery remains available from /menu.');
       return this.menu(id, true);
     }
-    if (command === '/help') return this.telegram.send(id, '/test — bot receipt check (does not submit to portal)\n/menu — main menu\n/cancel — clear this active session\n/save — saved sessions and statuses\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/finaltemplate — Excel template\n/finalbatch — upload Final Print list\n/batchstatus — batch progress\n/skip — skip current batch candidate\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
     let state = this.sessions.get(id);
     if (!state) return this.telegram.send(id, 'Send /start to choose a service.');
     state.updated = this.clock();
@@ -158,13 +183,19 @@ export class BotRouter {
       if(/^4(?:\.|$)/.test(text)) return this.saves?this.saves.dashboard(id):this.telegram.send(id,'Saved sessions are unavailable.');
       if(/^5(?:\.|$)/.test(text)) {
         if(!this.enableFinal||!this.final) return this.telegram.send(id,'Form lock & Final Print is disabled.');
+        const fields=await this.saves?.selectedFields?.(id)||{};
+        if(fields.profileSuffix) return this.startWithProfile(id,'final',fields);
         state.module='final';return this.final.start(id,{},this.batch&&this.access?.isAdmin(id));
       }
       if(/^3(?:\.|$)/.test(text)) {
         if(!this.enablePoly||!this.poly) return this.telegram.send(id,'OTNew-Poly is disabled pending live validation. Existing modules remain available.');
+        const fields=await this.saves?.selectedFields?.(id)||{};
+        if(fields.profileSuffix) return this.startWithProfile(id,'poly',fields);
         state.module='poly';return this.poly.start(id);
       }
       if (/^1(?:\.|$)/.test(text)) {
+        const fields=await this.saves?.selectedFields?.(id)||{};
+        if(fields.profileSuffix) return this.startWithProfile(id,'password',fields);
         state.module = 'password';
         return this.recovery.handle({...message, text:'/start'});
       }
@@ -179,10 +210,14 @@ export class BotRouter {
       if (/^[12](?:\.|$)/.test(text)) {
         if (text.startsWith('2')) {
           if (!this.registration) return this.telegram.send(id,'Scholarship registration is unavailable in this bot build. Use Back.');
+          const fields=await this.saves?.selectedFields?.(id)||{};
+          if(fields.profileSuffix) return this.startWithProfile(id,'registration',fields);
           state.module = 'registration';
           return this.registration.start(id);
         }
         state.module = 'otr';
+        const fields=await this.saves?.selectedFields?.(id)||{};
+        if(fields.profileSuffix) return this.startWithProfile(id,'otr',fields);
         return this.otr.start(id, 'recover');
       }
       return this.telegram.send(id, 'Choose 1 to Recover OTR, 2 for Scholarship registration using OTR, or Back.');
@@ -193,6 +228,10 @@ export class BotRouter {
     if (state.module === 'final-batch') return this.batch.handle(message);
     if (state.module === 'registration') return this.registration.handle(message);
     return this.otr.handle(message);
+  }
+
+  help(message) {
+    return this.telegram.send(message.chat.id, '/test — bot receipt check (does not submit to portal)\n/menu — main menu\n/back — previous editable input (completed requests cannot be undone)\n/cancel — clear this active session\n/save — saved sessions and statuses\n/saveuser — save OTR, registration and portal password encrypted\n/saveuserNN — select your saved profile for any menu; fill saved login details automatically\n/dsave [SESSION_ID] — save/retrieve registration\n/psave [SESSION_ID] — save/retrieve password recovery\n/reuse SESSION_ID — start a fresh session from saved fields\n/refresh — current CAPTCHA\n/retry — retry a failed page load\n/resend — request another OTP only when offered by the portal\n/result [SESSION_ID] — current result or saved OTNew-Poly PDF\n/boards — password recovery boards\n/search words, /next — search live dropdown options\n/edit — correct the current OTNew-Poly section\n/id — your Telegram user ID'+(this.access?.isAdmin(message.from.id)?'\n/finaltemplate — Excel template\n/finalbatch — upload Final Print list\n/batchstatus — batch progress\n/skip — skip current batch candidate\n/admin — manage allowed users\n/log — activity history\n/save user ID — saved statuses for that user':''));
   }
 
   async adminCommand(message,command) {

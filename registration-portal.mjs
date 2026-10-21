@@ -119,6 +119,19 @@ export class RegistrationPortal extends OtrPortal {
     this.revision++;
   }
 
+  async editPrevious(fingerprint) {
+    if(this.finalAttempted) return null;
+    const step=await this.read();
+    if(step.kind!=='form'||step.fingerprint!==fingerprint||!['fill','register'].includes(step.action.kind)) return null;
+    const index=REGISTRATION_FIELDS.findIndex(field=>field.key===step.fields[0].key)-1;
+    // District is fixed; the completed OTR lookup and department navigation are
+    // outside this editable details stage.
+    if(index<1) return null;
+    for(const field of REGISTRATION_FIELDS.slice(index)) this.answers.delete(field.key);
+    this.revision++;
+    return this.read();
+  }
+
   async submit(values,fingerprint) {
     if (this.finalAttempted) return {kind:'unknown'};
     const step = await this.read();

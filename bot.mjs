@@ -16,12 +16,14 @@ import {ActivityLog,loggedPortal} from './activity.mjs';
 import {SavedStore} from './saved-store.mjs';
 import {SavedSessions} from './saved-sessions.mjs';
 import {PolyBot} from './poly-core.mjs';
-import {PolyPortal} from './poly-portal.mjs';
+import {createPolyPortal} from './poly-obc-portal.mjs';
+import {createPolyHeadlessResolver} from './poly-headless.mjs';
 import {FinalBot} from './final-core.mjs';
 import {FinalPortal} from './final-portal.mjs';
 import {acquireInstanceLock} from './instance-lock.mjs';
 import {FinalBatch} from './final-batch.mjs';
 import {documentMime,downloadTelegramFile} from './telegram-files.mjs';
+import {telegramRequest,startupTelegramRequest} from './telegram-api.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -39,22 +41,8 @@ try {releaseInstance=await acquireInstanceLock(token);}
 catch(error) {console.error(error.message);process.exit(1);}
 
 class Telegram {
-  async api(method, body, multipart = false) {
-    // Never print request URLs: they contain the bot token.
-    let response;
-    try {
-      response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-        method:'POST',
-        headers: multipart ? undefined : {'Content-Type':'application/json'},
-        body: multipart ? body : JSON.stringify(body),
-        signal:AbortSignal.timeout(65_000),
-      });
-    } catch { throw new Error('Telegram connection failed.'); }
-    let data;
-    try { data = await response.json(); }
-    catch { throw new Error('Telegram returned an unreadable response.'); }
-    if (!data.ok) throw Object.assign(new Error(`Telegram request failed (${data.error_code ?? response.status}).`),{telegramCode:data.error_code ?? response.status});
-    return data.result;
+  api(method, body, multipart = false, options = {}) {
+    return telegramRequest({token,method,body,multipart,...options});
   }
   send(chatId, text, options = {}) {
     return this.api('sendMessage', {chat_id:chatId,text,reply_markup:{remove_keyboard:true},...options,protect_content:false});
@@ -86,7 +74,7 @@ try {
 const savedStore=new SavedStore({directory:process.env.SAVED_SESSIONS_DIR || undefined,keyFile:process.env.SAVED_SESSION_KEY_FILE || undefined});
 try {await savedStore.init();}
 catch {console.error('Cannot initialize encrypted saved sessions. Check storage permissions and restore the original key if records already exist.');process.exit(1);}
-const saves=new SavedSessions({store:savedStore,telegram,access,activity});
+const saves=new SavedSessions({store:savedStore,telegram,access,activity,defaultProfilePassword:process.env.POLY_DEFAULT_PASSWORD||''});
 const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,saves,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:userId => loggedPortal(new ScholarshipPortal({
@@ -104,7 +92,8 @@ const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,sa
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
 }),activity,{userId,module:'registration'})});
-const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:()=>new PolyPortal({headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
+const polyHeadless=createPolyHeadlessResolver();
+const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:(applicationType,categoryRoute)=>createPolyPortal({applicationType,categoryRoute,headless:polyHeadless(),channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
 const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:applicationType=>new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
 const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:type=>new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
 const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
@@ -134,6 +123,13 @@ async function shutdown() {
 process.on('SIGINT',shutdown);
 process.on('SIGTERM',shutdown);
 
+const startupApi = (method,body) => startupTelegramRequest(telegram.api.bind(telegram),method,body,{
+  onRetry:async ({method,nextAttempt,maxAttempts,delayMs,code,telegramCode}) => {
+    console.error(`Telegram startup ${method} failed (${code}). Retrying ${nextAttempt}/${maxAttempts} in ${delayMs/1000}s.`);
+    await activity.record({event:'system_error',module:'system',reason:'network',httpStatus:telegramCode});
+  },
+});
+
 try {
   const mode = process.env.BOT_MODE || (process.env.RENDER_EXTERNAL_URL ? 'webhook' : 'polling');
   if (!['polling','webhook'].includes(mode)) throw new Error('BOT_MODE must be polling or webhook.');
@@ -157,9 +153,9 @@ try {
       webhookServer.once('error',reject);
       webhookServer.listen(port,'0.0.0.0',resolve);
     });
-    const webhook = await telegram.api('getWebhookInfo',{});
+    const webhook = await startupApi('getWebhookInfo',{});
     if (webhook.url && webhook.url !== webhookURL) throw new Error('This bot already has a webhook on another service. Confirm migration before replacing that connection.');
-    const me = await telegram.api('getMe',{});
+    const me = await startupApi('getMe',{});
     await telegram.api('setWebhook',{
       url:webhookURL, secret_token:secret, max_connections:1, allowed_updates:['message'],
       // Keep pending updates: the message that wakes a sleeping service must not be discarded.
@@ -174,14 +170,14 @@ try {
       }
     }
   } else {
-    const webhook = await telegram.api('getWebhookInfo',{});
+    const webhook = await startupApi('getWebhookInfo',{});
     if (webhook.url) throw new Error('A webhook is configured for this token. Stop the cloud service and remove its webhook before switching to polling.');
-    const me = await telegram.api('getMe',{});
-    await activity.record({event:'bot_ready',module:'system',action:'polling'});
-    console.log(`Connected to @${me.username}. ${owner ? 'Admin-managed user access enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
+    const me = await startupApi('getMe',{});
   // Do not replay old CAPTCHA replies after restarting: a previous submission may have succeeded.
-  const previous = await telegram.api('getUpdates',{offset:-1,limit:1,timeout:0,allowed_updates:['message']});
+  const previous = await startupApi('getUpdates',{offset:-1,limit:1,timeout:0,allowed_updates:['message']});
   let offset = previous.length ? previous[0].update_id + 1 : 0;
+  await activity.record({event:'bot_ready',module:'system',action:'polling'});
+  console.log(`Connected to @${me.username}. ${owner ? 'Admin-managed user access enabled.' : 'Setup mode: send /id, set your owner ID, then restart.'}`);
   while (!stopping) {
     try {
       const updates = await telegram.api('getUpdates',{offset,timeout:30,allowed_updates:['message']});

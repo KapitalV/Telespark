@@ -1,6 +1,7 @@
 import {chromium} from 'playwright';
-import {POLY_ORIGIN,PREFIX,POLY_SECTIONS,filterOptions,normalizePoly,percentage} from './poly-schema.mjs';
+import {POLY_ORIGIN,PREFIX,POLY_SECTIONS,POLY_IGNORED_EMPTY_FIELDS,filterOptions,normalizePoly,percentage} from './poly-schema.mjs';
 import {validatePolyPdf} from './poly-pdf.mjs';
+import {unmappedPolyFields} from './poly-diagnostics.mjs';
 
 const paths=new Set(['/loginstudentpost.aspx','/postmatric/default.aspx','/postmatric/applicationforminstitute.aspx','/postmatric/applicationformupdateinstitute.aspx','/postmatric/applicationaccept.aspx','/postmatric/getincomecasteauth.aspx','/postmatric/tempprintinstitute.aspx']);
 const selector=id=>'#'+id;
@@ -11,8 +12,10 @@ export function readPolyDocument() {
   const fields=nodes.map(e=>({id:e.id,type:e.type,value:e.value,checked:e.checked,disabled:e.disabled||e.readOnly,label:label(e),required:e.required,maxLength:e.maxLength>0?e.maxLength:undefined,
     postback:/__doPostBack|WebForm_DoPostBackWithOptions/.test(e.getAttribute('onchange')||e.getAttribute('onclick')||''),
     options:e.tagName==='SELECT'?[...e.options].filter(o=>!o.disabled).map(o=>({value:o.value,label:o.text.trim()})):undefined}));
-  const radios=fields.filter(f=>f.id.startsWith('ContentPlaceHolder1_rb_regular_'));
-  if(radios.length) {for(const r of radios) fields.splice(fields.indexOf(r),1);fields.push({id:'ContentPlaceHolder1_rb_regular',type:'radio',value:radios.find(r=>r.checked)?.value||'',postback:radios.some(r=>r.postback),options:radios.map(r=>({value:r.value,label:r.label,id:r.id}))});}
+  for(const id of ['ContentPlaceHolder1_rb_regular','ContentPlaceHolder1_rb_regidancestdnt']) {
+    const radios=fields.filter(f=>f.type==='radio'&&f.id.startsWith(id+'_'));
+    if(radios.length) {for(const r of radios) fields.splice(fields.indexOf(r),1);fields.push({id,type:'radio',value:radios.find(r=>r.checked)?.value||'',disabled:radios.every(r=>r.disabled),postback:radios.some(r=>r.postback),options:radios.map(r=>({value:r.value,label:r.label,id:r.id}))});}
+  }
   const buttons=[...document.querySelectorAll('input[type=submit],input[type=button],button')].filter(visible).map(e=>({id:e.id,disabled:e.disabled,action:e.formAction||e.form?.action||location.href,target:e.formTarget||e.form?.target||''}));
   const links=[...document.querySelectorAll('a[href]')].filter(visible).map(e=>({id:e.id,href:e.href,text:e.innerText.trim(),target:e.target}));
   const record=id=>{const e=document.getElementById(id);return visible(e)?e.innerText.trim():'';};
@@ -24,8 +27,19 @@ export function readPolyDocument() {
 }
 
 export class PolyPortal {
-  constructor({headless=true,channel=process.platform==='win32'?'msedge':'chromium',launch=options=>chromium.launch(options)}={}) {
-    Object.assign(this,{headless,channel,launch});this.paths=new Set(paths);this.loginPath='/LoginStudentPost.aspx';this.loginRadioId='rbtnFR_0';this.answers=new Map();this.revision=0;this.closed=false;this.attempted=false;
+  constructor({applicationType='Fresh',sections=POLY_SECTIONS,ignoredEmptyFields=POLY_IGNORED_EMPTY_FIELDS,ignoredDefaultValues={},headless=true,channel=process.platform==='win32'?'msedge':'chromium',launch=options=>chromium.launch(options)}={}) {
+    if(!['Fresh','Renewal'].includes(applicationType)) throw Error('Choose Fresh or Renewal.');
+    Object.assign(this,{applicationType,sections,ignoredEmptyFields,ignoredDefaultValues,headless,channel,launch});
+    this.loginPath=applicationType==='Fresh'?'/LoginStudentPost.aspx':'/LoginStudentPostRenew.aspx';
+    this.loginRadioId=applicationType==='Fresh'?'rbtnFR_0':'rbtnFR_1';
+    // Renewal uses the same strict page-name allowlist in its own directory.
+    // Links still come from the authenticated page; unknown fields stop filling.
+    this.paths=new Set([...paths].map(path=>applicationType==='Renewal'?path.replace('/postmatric/','/postmatricrenewal/').replace('/loginstudentpost.aspx','/loginstudentpostrenew.aspx'):path));
+    this.answers=new Map();this.revision=0;this.closed=false;this.attempted=false;
+  }
+  pagePath(url) {
+    const path=new URL(url).pathname.toLowerCase();
+    return this.applicationType==='Renewal'?path.replace(/^\/postmatricrenewal\//,'/postmatric/'):path;
   }
   async open() {
     const browser=await this.launch({headless:this.headless,channel:this.channel==='chromium'?undefined:this.channel,timeout:30_000});
@@ -55,6 +69,11 @@ export class PolyPortal {
   }
   async login({registration,otr,password,captcha}) {
     let s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!==this.loginPath.toLowerCase()) return {kind:'unsupported'};
+    if(this.applicationType==='Renewal') {
+      const selected=s.fields.find(f=>f.type==='radio'&&f.checked&&f.id.startsWith(PREFIX+'rbtnFR_'));
+      if(!selected||!/renew|नवीनीकरण/i.test(selected.label)) return {kind:'unsupported',message:'The portal has not confirmed the selected Renewal login type. No credentials were submitted.'};
+      this.loginRadioId=selected.id.slice(PREFIX.length);
+    }
     this.registration=registration;this.otr=otr;this.dialog=undefined;
     for(const id of [this.loginRadioId,'rbtnLoginType_0']) {
       const element=this.page.locator(selector(PREFIX+id));
@@ -76,7 +95,7 @@ export class PolyPortal {
     await this.page.goto(url.href,{waitUntil:'domcontentloaded'});this.revision++;return this.read();
   }
   async choose(operation) {
-    const s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!=='/postmatric/default.aspx') return {kind:'unsupported'};
+    const s=await this.snapshot();if(!this.safe(s)||this.pagePath(s.url)!=='/postmatric/default.aspx') return {kind:'unsupported'};
     this.operation=operation;
     if(operation==='pdf') return this.pdf();
     if(operation==='certificates') {
@@ -85,26 +104,28 @@ export class PolyPortal {
     }
     // An update link is evidence that entry is already complete. Do not replay it.
     if(s.links.some(l=>l.id===PREFIX+'Href_update_Form')) return {kind:'complete',stage:'form'};
-    return this.go(s.links.find(l=>new URL(l.href).pathname.toLowerCase()==='/postmatric/applicationforminstitute.aspx'));
+    return this.go(s.links.find(l=>this.pagePath(l.href)==='/postmatric/applicationforminstitute.aspx'));
   }
   async home() {
     const s=await this.snapshot();if(!this.safe(s)) return {kind:'unsupported'};
-    if(new URL(s.url).pathname.toLowerCase()==='/postmatric/default.aspx') return this.read();
-    return this.go(s.links.find(l=>l.id==='Home'||new URL(l.href).pathname.toLowerCase()==='/postmatric/default.aspx'));
+    if(this.pagePath(s.url)==='/postmatric/default.aspx') return this.read();
+    return this.go(s.links.find(l=>l.id==='Home'||this.pagePath(l.href)==='/postmatric/default.aspx'));
   }
   values() {return Object.fromEntries([...this.answers].map(([key,v])=>[key,v.value]));}
+  optionalBlankFields(stage,snapshot) {return [];}
   token(stage,s,record='') {
     // Includes reviewed values and declaration labels, not cookies or hidden ASP.NET state.
     return JSON.stringify([this.revision,stage,s.url,s.formAction,s.fields.map(f=>[f.id,f.type,f.value,f.checked,f.disabled,f.options,f.label]),record]);
   }
   review(stage,s) {
-    const lines=POLY_SECTIONS[stage].fields.filter(f=>!['account-confirm'].includes(f.type)).map(f=>{const v=this.answers.get(f.key);return v?`${f.label}: ${v.display}`:undefined;}).filter(Boolean);
+    const lines=this.sections[stage].fields.filter(f=>!['account-confirm'].includes(f.type)).map(f=>{const v=this.answers.get(f.key);return v?`${f.label}: ${v.display}`:undefined;}).filter(Boolean);
+    if(stage==='academic') lines.push('Intermediate row: left blank as requested.');
     const ifsc=s.fields.find(f=>f.id===PREFIX+'txt_IfscCode');if(ifsc?.value) {this.ifsc=ifsc.value;lines.push('Portal IFSC: '+ifsc.value);}
     return lines;
   }
   async read() {
     const s=await this.snapshot();if(!this.safe(s)||this.dialog==='unknown') return {kind:'unsupported'};
-    const path=new URL(s.url).pathname.toLowerCase();
+    const path=this.pagePath(s.url);
     if(path===this.loginPath.toLowerCase()) return {kind:'expired'};
     if(path==='/postmatric/default.aspx') return this.operation==='certificates'&&s.certificatesComplete?{kind:'complete',stage:'certificates'}:{kind:'dashboard',certificatesComplete:s.certificatesComplete};
     if(path==='/postmatric/applicationaccept.aspx'&&s.text.includes('आपके आवेदन पत्र की प्रविष्टियाँ सफलतापूर्वक भरी गयीं है')) return {kind:'complete',stage:'form'};
@@ -112,13 +133,23 @@ export class PolyPortal {
     if(path==='/postmatric/getincomecasteauth.aspx') {
       stage=s.casteRecord?'caste':s.incomeRecord&&!s.text.includes('e-District डाटा से आय प्रमाण पत्र संख्या मिलान सफल')?'income':s.buttons.some(b=>b.id===PREFIX+'btn_submit_caste')?'caste':'income';
     } else if(['/postmatric/applicationforminstitute.aspx','/postmatric/applicationformupdateinstitute.aspx'].includes(path)) {
-      const candidates=['academic','personal','bank','fee'].filter(k=>s.buttons.some(b=>b.id===PREFIX+POLY_SECTIONS[k].button));
+      const candidates=['academic','personal','bank','fee'].filter(k=>s.buttons.some(b=>b.id===PREFIX+this.sections[k].button));
       if(candidates.length!==1) return {kind:'unsupported'};stage=candidates[0];
     } else return {kind:'unsupported'};
-    const section=POLY_SECTIONS[stage];this.stage=stage;
-    const allowed=new Set([...section.fields.map(f=>f.id),PREFIX+section.answer,PREFIX+section.declaration]);
+    const section=this.sections[stage];this.stage=stage;
+    const allowed=new Set([...section.fields.map(f=>f.id),...this.optionalBlankFields(stage,s),...(stage==='academic'?this.ignoredEmptyFields.map(id=>PREFIX+id):[]),PREFIX+section.answer,PREFIX+section.declaration]);
     // Disabled display fields are read-only. Any unmapped editable field stops submission.
-    if(s.fields.some(f=>!f.disabled&&!allowed.has(f.id))) return {kind:'unsupported',message:'This page contains additional editable fields. Please map them before submitting.'};
+    const diagnostic=unmappedPolyFields(s.fields,allowed);
+    if(diagnostic) return {kind:'unsupported',message:'This page contains additional editable fields. Please map them before submitting.',diagnostic:{...diagnostic,stage}};
+    // The Fresh form renders an additional Intermediate row even when this workflow
+    // is filling only the High School row. Leave it untouched and blank; if the
+    // portal pre-populates it, stop rather than silently sending those values.
+    if(stage==='academic'&&s.fields.some(f=>{
+      const key=f.id.slice(PREFIX.length),value=String(f.value||'').trim();
+      if(!this.ignoredEmptyFields.includes(key)||!value||this.ignoredDefaultValues[key]?.includes(value)) return false;
+      if(f.options?.some(o=>o.value===f.value)&&!filterOptions({},f.options).some(o=>o.value===f.value)) return false;
+      return true;
+    })) return {kind:'unsupported',message:'The unused Intermediate row contains data. Review the official portal before continuing.'};
     if(stage==='personal') {
       const parents=this.answers.get('DropDownList2');
       if(parents&&!/माता.?पिता दोनों जीवित|both.*alive/i.test(parents.display)) return {kind:'unsupported',message:'This parents-status branch has not been mapped. Please complete it on the official portal.'};
@@ -169,19 +200,24 @@ export class PolyPortal {
       else if(field.type==='account-confirm') {await element.fill('');await element.pressSequentially(value);await element.press('Tab');}
       else await element.fill(value);
     };
-    if(live.postback&&live.value!==value) await this.navigate(action);else {await action();this.revision++;}
+    // selectOption emits change even when the option is already selected.
+    // Accept an inspected existing choice without dispatching a fresh ASP.NET
+    // postback, which would otherwise race the next read/default fill.
+    if(field.options&&live.value===value) this.revision++;
+    else if(live.postback&&live.value!==value) await this.navigate(action);
+    else {await action();this.revision++;}
     this.answers.set(field.key,{value,display:field.options?.find(o=>o.value===value)?.label||value});
     return this.read();
   }
   async edit(key) {
-    const section=POLY_SECTIONS[this.stage],index=section.fields.findIndex(f=>f.key===key&&!f.computed);
+    const section=this.sections[this.stage],index=section.fields.findIndex(f=>f.key===key&&!f.computed);
     if(index<0) throw Error('Select a field from this section.');
     for(const field of section.fields.slice(index)) this.answers.delete(field.key);
     // Force an answered-but-unchanged value to be asked again on the next read.
     this.revision++;return this.read();
   }
   async captcha(refresh=false) {
-    const section=POLY_SECTIONS[this.stage];if(!section) return this.loginImage();
+    const section=this.sections[this.stage];if(!section) return this.loginImage();
     if(refresh) {
       const before=await this.page.locator('#'+section.captcha).getAttribute('src');
       await this.page.locator('#'+section.refresh).click();
@@ -197,7 +233,7 @@ export class PolyPortal {
   async submit(captcha,token,record=false) {
     if(this.attempted) return {kind:'unknown'};
     const step=await this.read();if(step.token!==token||step.kind!==(record?'record':'review')) return {kind:'unsupported'};
-    const s=await this.snapshot(),section=POLY_SECTIONS[step.stage],button=s.buttons.find(b=>b.id===PREFIX+(record?section.verify:section.button));
+    const s=await this.snapshot(),section=this.sections[step.stage],button=s.buttons.find(b=>b.id===PREFIX+(record?section.verify:section.button));
     if(!this.safeButton(button,s)) return {kind:'unsupported'};
     if(!record) {
       await this.page.locator(selector(PREFIX+section.answer)).fill(captcha);
@@ -213,12 +249,12 @@ export class PolyPortal {
     return {kind:'unknown'};
   }
   async pdf() {
-    const s=await this.snapshot();if(!this.safe(s)||new URL(s.url).pathname.toLowerCase()!=='/postmatric/default.aspx') throw Error('Return Home before printing.');
+    const s=await this.snapshot();if(!this.safe(s)||this.pagePath(s.url)!=='/postmatric/default.aspx') throw Error('Return Home before printing.');
     const link=s.links.find(l=>l.id===PREFIX+'Href_temp_Form');
-    if(!link||new URL(link.href).origin!==POLY_ORIGIN||new URL(link.href).pathname.toLowerCase()!=='/postmatric/tempprintinstitute.aspx') throw Error('Official check-print link unavailable.');
+    if(!link||new URL(link.href).origin!==POLY_ORIGIN||this.pagePath(link.href)!=='/postmatric/tempprintinstitute.aspx') throw Error('Official check-print link unavailable.');
     await this.page.goto(link.href,{waitUntil:'domcontentloaded'});this.revision++;
     const print=await this.snapshot();
-    if(!this.safe(print)||new URL(print.url).pathname.toLowerCase()!=='/postmatric/tempprintinstitute.aspx'||!print.text.replaceAll(/\s/g,'').includes(this.registration)||/Some Error Occurred|Your Request Could Not Be Processed/i.test(print.text)) throw Error('Check-print identity could not be verified.');
+    if(!this.safe(print)||this.pagePath(print.url)!=='/postmatric/tempprintinstitute.aspx'||!print.text.replaceAll(/\s/g,'').includes(this.registration)||/Some Error Occurred|Your Request Could Not Be Processed/i.test(print.text)) throw Error('Check-print identity could not be verified.');
     const native=print.links.find(l=>/\.pdf(?:[?#]|$)/i.test(l.href)&&new URL(l.href).origin===POLY_ORIGIN);
     let bytes;
     if(native) {

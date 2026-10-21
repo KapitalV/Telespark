@@ -107,7 +107,7 @@ export class RecoveryBot {
   async clear(chatId) {
     const state = this.sessions.get(chatId);
     this.sessions.delete(chatId);
-    if (state) {state.details={}; state.result=undefined;state.savedOutcomePending=undefined;}
+    if (state) {state.details={};state.reuseFields={}; state.result=undefined;state.savedOutcomePending=undefined;}
     void state?.portal?.close().catch(() => {});
   }
 
@@ -159,6 +159,7 @@ export class RecoveryBot {
       catch (error) { return send(error.message); }
       if (state.phase === 'questions') {
         state.index++;
+        this.applySavedAnswers(state);
         if (state.index < QUESTIONS.length) {
           const [nextField,prompt]=questionAt(state.index,state.details);
           return send(prompt,nextField==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);
@@ -216,13 +217,23 @@ export class RecoveryBot {
 
   async reuse(chatId,fields) {
     await this.clear(chatId);
-    const state={phase:'questions',index:0,details:{},updated:this.clock(),lastMessageId:-1};this.sessions.set(chatId,state);
+    const state={phase:'questions',index:0,details:{},reuseFields:structuredClone(fields),updated:this.clock(),lastMessageId:-1};this.sessions.set(chatId,state);
     for(;state.index<QUESTIONS.length;state.index++) {
       const [field,prompt]=questionAt(state.index,state.details);
-      try {state.details[field]=normalizeAnswer(field,fields[field]?.value ?? '');}
+      try {state.details[field]=normalizeAnswer(field,fields[field]?.value ?? '');delete state.reuseFields[field];}
       catch {return this.telegram.send(chatId,prompt,field==='board'?{reply_markup:BOARD_KEYBOARD}:undefined);}
     }
     return this.prepare(chatId,state);
+  }
+
+  applySavedAnswers(state) {
+    while(state.index<QUESTIONS.length) {
+      const [field]=questionAt(state.index,state.details),saved=state.reuseFields?.[field];
+      if(!saved) break;
+      delete state.reuseFields[field];
+      try {state.details[field]=normalizeAnswer(field,saved.value);state.index++;}
+      catch {break;}
+    }
   }
 
   async prepare(chatId, state) {

@@ -25,6 +25,30 @@ Only the originating Telegram user can retrieve/reuse details and images. Admin 
 
 ## Storage and backup
 
+### Saved-user shortcuts across menus
+
+`/saveuser` stores registration, OTR and a chosen password encrypted. `/saveuserNN`
+selects that owner's profile using the last two OTR digits. It works from the main
+menu or inside an individual module. It never replaces an active Excel batch.
+
+- **Form filling:** choose action, Fresh/Renewal and category. Saved credentials
+  fill automatically and the next prompt is the login CAPTCHA. Sending the
+  shortcut after choosing these options retains them.
+- **Final Print:** choose Fresh/Renewal, then answer the login CAPTCHA. There are
+  no repeated saved-registration, OTR or password confirmation prompts.
+- **Password recovery:** registration fills automatically; missing verification
+  fields are still requested.
+- **OTR:** scholarship registration can reuse the OTR. Recovery still asks for
+  the registered mobile number; login profiles do not contain it.
+- **Saved sessions:** viewing records remains available with the profile selected.
+
+`/menu` keeps the selection; `/cancel`, revocation, 20-minute expiry and restart
+clear it. Only the selected record ID/suffix are retained between menu choices.
+Passwords are decrypted for the authorized login and hidden in messages/logs.
+Wrong-password responses request correction rather than retrying automatically.
+Section reviews, final-lock confirmation and fresh CAPTCHA/OTP input remain required.
+Use `/back` to correct a login field before submitting its CAPTCHA.
+
 The file store needs no database service. It uses AES-256-GCM with a random nonce per write, authenticates each record against its session ID, and writes ciphertext through a flushed temporary file followed by replacement. Registration records include the chosen password; matching confirmation is reconstructed only for reuse. Recovery records retain the six answers and the verified returned password. Result PNGs are encrypted with the record; CAPTCHA/OTP controls are masked before capture. OTPs, CAPTCHA answers, cookies and arbitrary form fields are excluded.
 
 Defaults:

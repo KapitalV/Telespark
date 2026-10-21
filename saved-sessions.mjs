@@ -1,12 +1,12 @@
-import {FINAL_FIELDS,PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
+import {FINAL_FIELDS,PASSWORD_FIELDS,REGISTRATION_SAVED_FIELDS,SAVED_POLY_FIELDS,projectFields,SAVE_STATUS} from './saved-schema.mjs';
 import {questionAt,normalizeAnswer} from './core.mjs';
-import {POLY_FIELDS} from './poly-schema.mjs';
+import {normalizePoly} from './poly-schema.mjs';
 import {savedIdPattern} from './saved-store.mjs';
 
 const dateFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',dateStyle:'short',timeStyle:'short',hour12:false});
 const commandFor=module=>module==='password'?'/psave':['poly','final'].includes(module)?'/save':'/dsave';
 export class SavedSessions {
-  constructor({store,telegram,access,activity,clock=()=>Date.now()}) {Object.assign(this,{store,telegram,access,activity,clock});}
+  constructor({store,telegram,access,activity,clock=()=>Date.now(),defaultProfilePassword=''}) {Object.assign(this,{store,telegram,access,activity,clock,defaultProfilePassword});this.userProfiles=new Map();this.selectedProfiles=new Map();}
   bind(router) {this.router=router;}
   bot(module) {return module==='password'?this.router.recovery:module==='poly'?this.router.poly:module==='final'?this.router.final:this.router.registration;}
   async log(userId,event,module) {await this.activity?.record({event,userId,module});}
@@ -40,6 +40,107 @@ export class SavedSessions {
   async prompt(id,module) {
     return this.telegram.send(id,`Details are saved automatically before submission. ${commandFor(module)} optionally saves a draft; /save lists your records. OTPs, CAPTCHA answers and cookies are excluded.`);
   }
+  async startUserProfile(id) {
+    if(!this.access.canUse(id)) return;
+    // A saved-user entry replaces any unfinished portal conversation.  This
+    // closes its isolated browser and prevents a later reply from being
+    // applied to the wrong candidate.
+    await this.router?.clear(id);
+    this.userProfiles.set(id,{phase:'otr',fields:{},updated:this.clock()});
+    return this.telegram.send(id,'Save an encrypted user profile for the bot menus. Enter the OTR number. The short command is based on its last two digits; passwords stay encrypted and are hidden when viewed. Send /cancel to stop.');
+  }
+  hasUserProfile(id) {return this.userProfiles.has(id);}
+  async clearUserProfile(id) {const profile=this.userProfiles.get(id);if(profile) {profile.fields={};profile.password=undefined;this.userProfiles.delete(id);}}
+  clearSelectedProfile(id) {this.selectedProfiles.delete(id);}
+  async selectedFields(id) {
+    const selected=this.selectedProfiles.get(id);
+    if(!selected) return {};
+    if(!this.access.canUse(id)||this.clock()-selected.updated>20*60_000) {this.clearSelectedProfile(id);return {};}
+    try {
+      const record=await this.store.get(selected.id,id);
+      selected.updated=this.clock();
+      return structuredClone(record.fields);
+    } catch {
+      this.clearSelectedProfile(id);
+      await this.telegram.send(id,'The selected profile is unavailable. Enter details normally or select another saved-user command.');
+      return {};
+    }
+  }
+  async expire() {
+    for(const [id,profile] of this.userProfiles) if(this.clock()-profile.updated>20*60_000) await this.clearUserProfile(id);
+    for(const [id,profile] of this.selectedProfiles) if(!this.access.canUse(id)||this.clock()-profile.updated>20*60_000) this.clearSelectedProfile(id);
+  }
+  async userProfileReply(message) {
+    const id=message.chat.id,profile=this.userProfiles.get(id),text=message.text.trim(),command=text.split(/\s+/)[0].toLowerCase();
+    if(!profile||!this.access.canUse(id)) {await this.clearUserProfile(id);return;}
+    profile.updated=this.clock();
+    if(command==='/cancel') {await this.clearUserProfile(id);return this.telegram.send(id,'Saved-user entry cancelled. No profile was changed.');}
+    if(command==='/menu'||command==='/start') {await this.clearUserProfile(id);return this.router.menu(id);}
+    if(command==='/saveuser') return this.startUserProfile(id);
+    if(text.startsWith('/')) return this.telegram.send(id,'Finish the saved-user prompt or send /cancel.');
+    if(profile.phase==='otr') {
+      try {profile.fields.otr=normalizePoly({key:'otr',type:'text'},text);} catch {return this.telegram.send(id,'Enter a valid OTR in the format UP26-0000000001.');}
+      profile.phase='registration';return this.telegram.send(id,'Enter the registration number exactly as shown on the registration slip.');
+    }
+    if(profile.phase==='registration') {
+      try {profile.fields.registration=normalizePoly({key:'registration',type:'digits'},text);} catch {return this.telegram.send(id,'Enter the registration number using digits only; leading zeros are preserved.');}
+      profile.phase='password-choice';
+      const rows=this.defaultProfilePassword?[['USE DEFAULT PASSWORD'],['OTHER PASSWORD'],['/cancel']]:[['OTHER PASSWORD'],['/cancel']];
+      return this.telegram.send(id,'Choose the saved portal password. The default is stored from local environment configuration; choose Other to enter a different password.',{reply_markup:{keyboard:rows,resize_keyboard:true,one_time_keyboard:true}});
+    }
+    if(profile.phase==='password-choice') {
+      const choice=text.toUpperCase();
+      if(choice==='USE DEFAULT PASSWORD'||choice==='USE DEFAULT') {
+        if(!this.defaultProfilePassword) return this.telegram.send(id,'No default password is configured locally. Choose Other password and enter it.');
+        profile.password=this.defaultProfilePassword;return this.saveUserProfile(id,profile);
+      }
+      if(choice==='OTHER PASSWORD'||choice==='OTHER') {profile.phase='password';return this.telegram.send(id,'Enter the portal password to save encrypted.');}
+      return this.telegram.send(id,'Choose USE DEFAULT PASSWORD or OTHER PASSWORD.');
+    }
+    if(profile.phase==='password') {
+      if(!text||text.length>200||/[\u0000-\u001f]/.test(text)) return this.telegram.send(id,'Enter a password of 1–200 characters.');
+      profile.password=text;return this.saveUserProfile(id,profile);
+    }
+  }
+  async saveUserProfile(id,profile) {
+    const otr=profile.fields.otr,registration=profile.fields.registration,password=profile.password;
+    const suffix=otr.replace(/\D/g,'').slice(-2);
+    const fields={otr:{value:otr},registration:{value:registration},profileSuffix:{value:suffix},password:{value:password}};
+    try {
+      const existing=await this.store.findByField({userId:id,module:'poly',key:'profileSuffix',value:suffix});
+      if(existing&&existing.fields.otr?.value!==otr) {
+        await this.clearUserProfile(id);return this.telegram.send(id,`Cannot save: /saveuser${suffix} already belongs to a different OTR. The existing profile was left unchanged.`);
+      }
+      if(existing&&!['draft','ready'].includes(existing.status)) {
+        await this.clearUserProfile(id);return this.telegram.send(id,`/saveuser${suffix} is already tied to a protected session and was not overwritten. Use the existing profile command to load it.`);
+      }
+      const record=await this.store.save({id:existing?.id,userId:id,module:'poly',fields,ready:false});
+      await this.log(id,'session_saved','poly');await this.clearUserProfile(id);
+      return this.telegram.send(id,`Encrypted user profile saved as ${record.id}. Use /saveuser${suffix} from the menu or a selected module to fill available details automatically. Password is hidden in saved-session views.`);
+    } catch {
+      await this.log(id,'save_failed','poly');await this.clearUserProfile(id);
+      return this.telegram.send(id,'Could not save the encrypted user profile. No portal request was made; check local saved-session storage and try again.');
+    }
+  }
+  async useUserProfile(id,suffix) {
+    if(!this.access.canUse(id)) return;
+    try {
+      const record=await this.store.findByField({userId:id,module:'poly',key:'profileSuffix',value:suffix});
+      if(!record||!record.fields.registration?.value||!record.fields.otr?.value||!record.fields.password?.value) return this.telegram.send(id,`No complete saved profile exists for /saveuser${suffix}. Send /saveuser to create it.`);
+      const module=this.router.sessions.get(id)?.module;
+      if(module==='final-batch') return this.telegram.send(id,'A saved-user shortcut cannot replace an Excel batch. Use /cancel first, then select an individual service.');
+      const poly=this.router.poly?.sessions.get(id);
+      const final=this.router.final?.sessions.get(id);
+      const context=module==='poly'?{operation:poly?.operation,applicationType:poly?.applicationType,categoryRoute:poly?.categoryRoute}
+        :module==='final'?{applicationType:final?.applicationType}:{};
+      await this.router.clear(id);
+      this.selectedProfiles.set(id,{id:record.id,suffix,updated:this.clock()});
+      await this.log(id,'session_reused','poly');
+      await this.telegram.send(id,`Selected /saveuser${suffix}. Available details fill automatically; the password stays hidden. Missing choices and fresh CAPTCHA/OTP answers are still required.`);
+      if(['poly','final','password','registration','otr'].includes(module)) return await this.router.startWithProfile(id,module,record.fields,context);
+      return await this.router.menu(id,module==='otr-menu');
+    } catch {return this.telegram.send(id,'Could not load this saved profile. Check the two-digit suffix and that the profile belongs to this Telegram account.');}
+  }
   async dashboard(id,args=[]) {
     if(this.router.sessions.get(id)?.module==='poly') await this.router.poly?.checkpoint(id,{ready:this.router.poly.sessions.get(id)?.phase==='confirm'});
     const state=this.router.sessions.get(id),active=state && this.bot(state.module)?.sessions.get(id);
@@ -52,8 +153,8 @@ export class SavedSessions {
     await this.sendLines(id,[`Saved sessions — ${userId?'your records':'all users, status only'} — page ${page}`,
       ...list.records.map(r=>`${r.id}\nUser ${r.userId} | ${r.module}${r.stage?' / '+r.stage:''} | ${SAVE_STATUS[r.status]} | ${dateFormat.format(new Date(r.updatedAt))} IST | Attempts: ${r.attempts}`),
       ...(list.total?[]:['No saved sessions yet.']),`Total: ${list.total}. /save ${page+1} shows the next page.`,
-      'Choose /dsave for registration or /psave for password recovery. OTNew-Poly: /save SESSION_ID for details, /result SESSION_ID for the PDF. Retrieval makes no website request.']);
-    await this.telegram.send(id,'Save current details or browse your records:',{reply_markup:{keyboard:[['/dsave','/psave']],resize_keyboard:true,one_time_keyboard:true}});
+      'Choose /saveuser to save a login profile. /saveuserNN selects it across the menus using the last two OTR digits. Choose /dsave for registration or /psave for password recovery. OTNew-Poly: /save SESSION_ID for details, /result SESSION_ID for the PDF. Retrieval makes no website request.']);
+    await this.telegram.send(id,'Save current details or browse your records:',{reply_markup:{keyboard:[['/saveuser'],['/dsave','/psave']],resize_keyboard:true,one_time_keyboard:true}});
   }
   async handle(message,command) {
     const id=message.chat.id,args=message.text.trim().split(/\s+/).slice(1);
@@ -104,9 +205,9 @@ export class SavedSessions {
   }
   async show(id,sessionId,module) {
     const record=await this.store.get(sessionId,id);if(record.module!==module) throw new Error('Wrong module.');
-    const labels=module==='password'?PASSWORD_FIELDS:module==='poly'?POLY_FIELDS:module==='final'?FINAL_FIELDS:REGISTRATION_SAVED_FIELDS;
+    const labels=module==='password'?PASSWORD_FIELDS:module==='poly'?SAVED_POLY_FIELDS:module==='final'?FINAL_FIELDS:REGISTRATION_SAVED_FIELDS;
     const lines=[`${record.id} — ${SAVE_STATUS[record.status]}`,`Updated: ${dateFormat.format(new Date(record.updatedAt))} IST`,
-      ...Object.entries(record.fields).map(([key,field])=>`${labels[key]}: ${(field.label ?? field.value) || '(none)'}`)];
+      ...Object.entries(record.fields).map(([key,field])=>`${labels[key]}: ${key==='password'?'(saved encrypted; hidden)':(field.label ?? field.value) || '(none)'}`)];
     if(record.result?.password) lines.push(`Latest recovered password: ${record.result.password}`);
     if(['attempted','uncertain'].includes(record.status)) lines.push('The website outcome is not confirmed. Check the official portal before considering another submission.');
     lines.push(`Viewing this record does not contact the website. /reuse ${record.id} loads its fields into a fresh session; fresh verification is required; saving is automatic.`);

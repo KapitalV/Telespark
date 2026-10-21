@@ -174,6 +174,20 @@ test('Registration browser workflow with observed controls (network fully interc
     assert.equal(f.bot.sessions.get(42).phase,'unsupported');
     assert.equal(fs.posts.filter(p=>p.has('final')).length,0);
   });
+  await t.test('Typed back reopens previous registration answers and clears dependent passwords without a final POST',async()=>{
+    const fs=await fixture(),f=chat(fs.portal);
+    await untilCaptcha(f);
+    await f.say('/back');assert.equal(f.bot.sessions.get(42).step.fields[0].type,'password-confirm');
+    assert.equal(fs.portal.answers.has(p+'txt_pwd_confirm'),false);
+    await f.say('/back');assert.equal(f.bot.sessions.get(42).step.fields[0].type,'password');
+    assert.equal(fs.portal.answers.has(p+'txt_pwd'),false);
+    for(const answer of ['Changed1@','Changed1@','AbC12']) await f.say(answer);
+    assert.equal(f.bot.sessions.get(42).phase,'confirm');
+    await f.say('/back');assert.equal(f.bot.sessions.get(42).phase,'questions');assert.equal(f.bot.sessions.get(42).step.fields[0].type,'captcha');
+    assert.equal(f.bot.sessions.get(42).values[p+'txtCaptcha'],undefined);
+    assert.equal(fs.posts.filter(post=>post.has('final')).length,0);
+    const before=fs.posts.length;assert.equal(await fs.portal.editPrevious('stale-token'),null);assert.equal(fs.posts.length,before);
+  });
   await t.test('Portal retains form after submission: return response image, never claim success or retry',async()=>{
     const fs=await fixture({unchangedFinal:true});const f=chat(fs.portal);
     await untilCaptcha(f);await f.say('AbC12');await f.say('CONFIRM');

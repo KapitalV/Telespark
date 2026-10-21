@@ -1,8 +1,12 @@
-# Telespark — UP Scholarship Telegram recovery bot
+# Telespark — UP Scholarship Telegram bot
+
+**Start here: [Master project guide and developer handoff](master.md).** Covers all five menu options, Fresh/Renewal and OBC form filling, saved-user profiles, architecture, operations, tests and the current unresolved work.
+
+**Quick saved-user login:** Send `/saveuserNN`, then choose a service. Form filling and individual Final Print fill saved credentials automatically and show the login CAPTCHA after the required route choices. The shortcut also works inside a selected module. Section submission and locking still require review. See [saved-user shortcuts](SAVED_SESSIONS.md#saved-user-shortcuts-across-menus).
 
 **Final Print Excel batches:** The admin can upload up to 100 candidates through `/finalbatch` or **5 → Excel batch**, answer each login CAPTCHA, and receive saved PDFs sequentially. `/finaltemplate` supplies the blank workbook. Batches never lock applications. See [Excel batch instructions](FINAL_BATCH.md) for password presets, retry behavior, reports and local configuration.
 
-This personal bot asks six questions in a private Telegram chat, fills the official postmatric recovery website, sends the CAPTCHA image, and submits when you reply with its text. On success it returns the latest password and the recovery slip. It uses Node.js, Playwright, and the Telegram Bot API. No AI subscription or public server is needed to run it on your PC.
+This private-chat bot supports password recovery, OTR recovery and scholarship registration, form filling and check-print PDFs, encrypted saved sessions, and application locking/final printing. It uses Node.js, Playwright, and the Telegram Bot API. Users answer current CAPTCHA/OTP prompts and review submissions. No AI subscription or public server is needed to run it on your PC. See the master guide for each workflow and its verification limits.
 
 To use it while your PC is off, follow [Deploy on Render](DEPLOY_RENDER.md). The included Dockerfile uses Chromium on Linux and reads secrets from the hosting environment. Free web-service hosting uses Telegram webhooks; a paid worker uses polling.
 
@@ -37,7 +41,7 @@ HEADLESS=true
 BROWSER_CHANNEL=msedge
 ```
 
-The placeholders are examples; never paste them literally as your token. Set `HEADLESS=false` if you want to watch the browser. If using an installed Google Chrome instead, set `BROWSER_CHANNEL=chrome`. The default on Windows is Edge even if this line is omitted. On another platform, set `BROWSER_CHANNEL=chromium` and run `npm.cmd run install-browser` (use `npm` outside Windows).
+The placeholders are examples; never paste them literally as your token. Set `HEADLESS=false` if you want to watch every module's browser. For a one-time visible OTNew-Poly test only, set `OTNEW_POLY_VISIBLE_ONCE=true`; the next OTNew-Poly portal session opens visibly and later sessions return to the `HEADLESS` setting. If using an installed Google Chrome instead, set `BROWSER_CHANNEL=chrome`. The default on Windows is Edge even if this line is omitted. On another platform, set `BROWSER_CHANNEL=chromium` and run `npm.cmd run install-browser` (use `npm` outside Windows).
 
 Keep `.env` local. Git ignores it and other `.env.*` files, except the empty `.env.example` template. If a real token has previously been committed, revoke it in BotFather and use a replacement: removing the file from the latest commit does not remove the token from Git history.
 
@@ -99,7 +103,7 @@ Send `/start` to your bot. It asks, in order:
 5. Class 10 passing year as entered in your original application
 6. Class 10 roll number, preserving leading zeros
 
-After six answers, open `/save` and select `/psave`. The bot then fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits recovery. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
+After six answers, the bot fills the official website and sends its CAPTCHA image. Reply with the exact characters, preserving letter case. That reply submits recovery after an automatic encrypted save; `/save` and `/psave` are optional, not prerequisites. CAPTCHA recognition is done by you; automatic CAPTCHA solving is not included.
 
 After success, the bot sends your latest password and a PNG recovery slip. If the official page is readable but its outcome is unrecognized, the bot sends a screenshot labelled as unconfirmed, so you can read the website's response. A result labelled with a different registration number is not delivered. Repeated recovery may generate a different password. Use `/result` to resend a saved result or response screenshot without submitting again. New text and images allow copying, saving, downloading and forwarding; previously protected messages keep their existing Telegram restrictions.
 
@@ -160,7 +164,7 @@ OTR recovery now has a dedicated adapter; see [OTR_RECOVERY.md](OTR_RECOVERY.md)
 for its rebuilt flow. A live recovered OTR screenshot was verified in the
 owner's Telegram chat on 2026-10-10.
 
-`/start` now offers **1. Password recovery** and **2. OTR**. Password recovery
+The main menu includes **1. Password recovery** and **2. OTR**, followed by form filling, saved sessions and final print; see the [complete menu](master.md). Password recovery
 retains its existing six-question flow. OTR is off unless `ENABLE_OTR=true`.
 Its submenu offers **Recover OTR**, **Scholarship registration using OTR**, and **Back**.
 

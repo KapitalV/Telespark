@@ -84,6 +84,16 @@ export class SavedStore {
     await this.queue.catch(()=>{});const record=await this.read(id);
     if(record.userId!==telegramUserId(userId)) throw failure();return record;
   }
+  async findByField({userId,module,key,value}) {
+    userId=telegramUserId(userId);await this.queue.catch(()=>{});
+    if(!['registration','password','poly','final'].includes(module)||typeof key!=='string'||typeof value!=='string') throw failure();
+    for(const name of await readdir(this.directory)) {
+      if(!name.endsWith('.enc')||!idPattern.test(name.slice(0,-4))) continue;
+      const record=await this.read(name.slice(0,-4));
+      if(record.userId===userId&&record.module===module&&record.fields[key]?.value===value) return record;
+    }
+    return undefined;
+  }
   save({id,userId,module,fields,ready=false}) {
     userId=telegramUserId(userId);fields=projectFields(module,fields);
     return this.serial(async()=>{

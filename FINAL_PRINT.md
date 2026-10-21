@@ -10,7 +10,7 @@ The admin also sees **Excel batch** beside Fresh/Renewal. It processes a candida
 4. Enter the current CAPTCHA. `/refresh` replaces it.
 5. The bot verifies the dashboard registration and reads the live lock/print controls. Existing institution print availability skips locking.
 6. Review the applicant, portal notice and confirmation warning, then reply **YES** to authorize one lock attempt. The observed literal `onclick` confirmation is included in the initial review; the bot accepts OK only when that exact reviewed warning appears. A changed warning invalidates the review. Other JavaScript confirmations are dismissed and shown for a further YES. Unknown forms stop.
-7. When the institution print link is available, download its official PDF, or generate an A4 PDF from that authenticated page. Validate readable pages and applicant registration before sending it to the same authorized private chat.
+7. When the institution print link is available, click the live link and acknowledge optional browser OK declarations during its verified print navigation, including a same-context new tab. No popup is required. This permission ends when navigation completes; input prompts, unmapped destinations and repeated dialog loops stop. Printing blocks form POSTs and never authorizes another lock. Download its official PDF, or generate an A4 PDF from that authenticated page. Validate readable pages and applicant registration before sending it to the same authorized private chat.
 8. If that mapped print page contains a recognized portal server error, print and send it as `Lnnnn-INCOMPLETE-portal-error.pdf`, as requested. Its caption explains that it is not a valid application. Store it encrypted with an incomplete flag and uncertain status; `/result Lnnnn` preserves the warning. Missing applicant details are never manufactured.
 
 The observed **PRINT THIS PAGE** button invokes `window.print()`. The bot uses the browser's print layout to generate PDF bytes directly and sends a downloadable Telegram document, like Check Print. No desktop Save dialog is needed. Once the portal returns a complete valid application, the normal final-PDF path is used automatically.
@@ -33,6 +33,8 @@ FINAL_DEFAULT_PASSWORD=
 Enable locally to conduct a supervised live test. No remote deployment is included.
 
 ## Validation limits
+
+21 October 2026: intercepted browser fixtures cover optional print confirmations on the dashboard and disclaimer page, alert/confirm combinations, same-tab/new-tab navigation, absent popups, and rejection of input prompts, repeated dialogs and form POSTs. Lock warnings still require their exact reviewed approval. This optional-dialog change has not yet been verified against a live applicant; custom HTML modals remain unsupported until inspected.
 
 The supplied Fresh dashboard establishes `ContentPlaceHolder1_Href_temp_lock`, the ASP.NET postback target, and the `ContentPlaceHolder1_FinalPrint` container. Final print destinations are read from the live enabled anchor, not constructed or clicked by row number. Renewal uses its specified login URL but its checked renewal mode must be explicitly labelled and the dashboard controls must match; additional controls or unfamiliar pages are unsupported.
 

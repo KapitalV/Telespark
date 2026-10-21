@@ -7,7 +7,7 @@ import {FINAL_ERROR_CODES} from './final-errors.mjs';
 
 // A closed vocabulary prevents submitted values, portal text and exception
 // messages from becoming persistent logs, even if a caller passes extra keys.
-export const LOG_COMMANDS=new Set(['/finaltemplate','/finalbatch','/batchstatus','/skip','/test','/start','/menu','/id','/help','/cancel','/otr','/boards','/retry','/refresh','/resend','/result','/search','/next','/adduser','/removeuser','/users','/admin','/log','/save','/dsave','/psave','/reuse','/edit']);
+export const LOG_COMMANDS=new Set(['/back','/finaltemplate','/finalbatch','/batchstatus','/skip','/test','/start','/menu','/id','/help','/cancel','/otr','/boards','/retry','/refresh','/resend','/result','/search','/next','/adduser','/removeuser','/users','/admin','/log','/save','/saveuser','/dsave','/psave','/reuse','/edit']);
 const vocabulary={
   code:FINAL_ERROR_CODES,
   event:new Set(['message','handled','denied','ignored','access_changed','session_expired','portal_started','portal_result','portal_error','bot_started','bot_ready','bot_stopped','system_error','log_viewed','log_exported','session_saved','session_viewed','session_reused','save_failed']),

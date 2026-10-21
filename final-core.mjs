@@ -6,13 +6,31 @@ export class FinalBot {
   constructor({telegram,portalFactory,store,canUse,activity,defaultPassword='',clock=()=>Date.now(),timeoutMs=75_000}) {
     Object.assign(this,{telegram,portalFactory,store,canUse,activity,defaultPassword,clock,timeoutMs});this.sessions=new Map();
   }
-  async clear(id) {const s=this.sessions.get(id);this.sessions.delete(id);if(s){s.credentials={};s.pdf=undefined;await s.portal?.close();}}
+  async clear(id) {const s=this.sessions.get(id);this.sessions.delete(id);if(s){s.credentials={};s.reuse={};s.pdf=undefined;await s.portal?.close();}}
   async expire() {for(const [id,s] of this.sessions) if(!s.busy&&this.clock()-s.updated>20*60_000) await this.clear(id);}
   async say(id,text,options) {if(!this.canUse(id))return;const message=await this.telegram.send(id,text,options);const s=this.sessions.get(id);if(s)s.promptId=message?.message_id;return message;}
-  async start(id,fields={},allowBatch=false) {
+  async start(id,fields={},allowBatch=false,context={}) {
     await this.clear(id);if(!this.canUse(id))return;
-    this.sessions.set(id,{phase:'type',credentials:{},updated:this.clock(),lastMessageId:0,reuse:fields});
+    const s={phase:'type',credentials:{},updated:this.clock(),lastMessageId:0,reuse:structuredClone(fields),quickProfile:context.quickProfile===true};
+    this.sessions.set(id,s);
+    if(context.quickProfile&&['Fresh','Renewal'].includes(context.applicationType)) {
+      s.applicationType=context.applicationType;return this.profileLogin(id,s);
+    }
     return this.say(id,'Form lock & Final Print — choose Fresh or Renewal for one applicant.'+(allowBatch?' Choose Excel batch to print a candidate list without locking.':'')+' The bot checks the portal status before offering an individual final lock. Institution print may only become available after the portal waiting period.',keyboard([['Fresh','Renewal'],...(allowBatch?[['Excel batch']]:[]),['/menu']]));
+  }
+  async profileLogin(id,s) {
+    if(s.quickProfile) {
+      for(const key of ['registration','otr','password']) {
+        try {s.credentials[key]=normalizePoly({key,type:key==='registration'?'digits':'text'},s.reuse[key]?.value||'');}
+        catch {
+          s.phase=key==='password'?'password':key;
+          return this.say(id,`Enter the ${key==='password'?'existing portal password':key+' number'}.`);
+        }
+      }
+      try {return await this.open(id,s);}
+      catch {s.phase='blocked';s.credentials={};s.reuse={};await s.portal?.close();return this.say(id,'Could not prepare the login CAPTCHA. Use your saved-user command to try a fresh login, or /cancel.');}
+    }
+    s.phase='registration';return this.say(id,'Enter the registration number.');
   }
   async call(id,s,method,...args) {
     let timer;await this.activity?.record({event:'portal_started',module:'final',userId:id,action:method});
@@ -20,7 +38,7 @@ export class FinalBot {
       const result=await Promise.race([s.portal[method](...args),new Promise((_,reject)=>{timer=setTimeout(()=>{void s.portal.close();reject(Error('timeout'));},this.timeoutMs);})]);
       if(this.sessions.get(id)!==s||!this.canUse(id)) throw Error('Session closed');
       await this.activity?.record({event:'portal_result',module:'final',userId:id,action:method,result:result?.kind});return result;
-    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation stopped'),{code});}
+    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation stopped'),{code,image:code==='FINAL-PAGE'&&Buffer.isBuffer(error.image)?error.image:undefined});}
     finally {clearTimeout(timer);}
   }
   fields(s) {return {registration:{value:s.credentials.registration},otr:{value:s.credentials.otr},applicationType:{value:s.applicationType}};}
@@ -29,6 +47,7 @@ export class FinalBot {
     return this.say(id,'Choose the configured default password or enter another password. Login passwords are temporary and are not saved in session records.',keyboard(this.defaultPassword?[['Use default password','Other'],['/cancel']]:[['Other'],['/cancel']]));
   }
   async open(id,s) {
+    s.passwordStep=s.phase==='password'?'password':'password-choice';
     s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType);
     const image=await this.call(id,s,'open');s.phase='captcha';return this.photo(id,s,image);
   }
@@ -92,7 +111,7 @@ export class FinalBot {
       if(text==='/result') return s.pdf?await this.deliver(id,s):await this.say(id,'No final PDF is available in this session yet.');
       if(s.phase==='type') {
         const type=/^fresh$/i.test(text)?'Fresh':/^renewal$/i.test(text)?'Renewal':undefined;
-        if(!type)return await this.say(id,'Choose Fresh or Renewal.');s.applicationType=type;s.phase='registration';return await this.say(id,'Enter the registration number.');
+        if(!type)return await this.say(id,'Choose Fresh or Renewal.');s.applicationType=type;return await this.profileLogin(id,s);
       }
       if(s.phase==='registration'||s.phase==='otr') {
         try {s.credentials[s.phase]=normalizePoly({type:s.phase==='registration'?'digits':'text',key:s.phase},text);}catch{return await this.say(id,'Enter a valid '+s.phase+' number.');}
@@ -110,7 +129,7 @@ export class FinalBot {
       if(s.phase==='captcha') {
         if(text==='/refresh')return await this.photo(id,s,await this.call(id,s,'refreshLogin'));
         if(!/^[A-Za-z0-9]{4,8}$/.test(text))return await this.say(id,'Enter the CAPTCHA exactly, or /refresh.');
-        let next;try{next=await this.call(id,s,'login',{...s.credentials,captcha:text});}finally{delete s.credentials.password;}
+        let next;try{next=await this.call(id,s,'login',{...s.credentials,captcha:text});}finally{delete s.credentials.password;delete s.reuse.password;s.quickProfile=false;}
         if(next.kind==='login-error') {await this.say(id,'Login was not accepted. Choose the password again for a fresh CAPTCHA.');return await this.passwordPrompt(id,s);}
         return await this.status(id,s,next);
       }
@@ -118,6 +137,7 @@ export class FinalBot {
       return await this.say(id,'Use /result to retrieve an available PDF, or /start for a fresh portal status check. No lock will be repeated automatically.');
     } catch(error) {
       const uncertain=s.phase==='submitting';s.phase=s.pdf?'done':uncertain?'unknown':'blocked';delete s.credentials.password;await s.portal?.close();
+      if(this.canUse(id)&&Buffer.isBuffer(error.image))await this.telegram.photo(id,error.image,'Final Print stopped on this portal page. Diagnostic: FINAL-PAGE. This is a diagnostic screenshot, not a completed application.').catch(()=>{});
       const diagnostic=finalErrorNotice(finalErrorCode(error));if(diagnostic)await this.say(id,diagnostic);
       return await this.say(id,s.pdf?'The PDF is retained. Use /result to retry saving or delivery; locking will not be repeated.':uncertain?'The lock outcome is uncertain. Check the official portal before another attempt. No automatic retry will occur.':s.lockConfirmed?'Locking is confirmed, but final PDF generation failed. Use a fresh login through option 5 to check print availability; do not lock again.':'The operation stopped. Check the portal or local storage, then use /start for a fresh session. No automatic submission retry will occur.');
     } finally {s.busy=false;}

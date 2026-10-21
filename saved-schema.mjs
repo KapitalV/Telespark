@@ -1,4 +1,6 @@
 import {POLY_FIELDS} from './poly-schema.mjs';
+import {OBC_SAVED_FIELDS} from './poly-obc-schema.mjs';
+export const SAVED_POLY_FIELDS={...POLY_FIELDS,...OBC_SAVED_FIELDS};
 export const PASSWORD_FIELDS={applicationType:'Application type',registration:'Registration number',dob:'Date of birth',mobile:'Registered mobile',board:'High-school board',year:'Passing year',roll:'Roll number'};
 const p='ContentPlaceHolder1_';
 export const REGISTRATION_SAVED_FIELDS={
@@ -10,7 +12,7 @@ export const REGISTRATION_SAVED_FIELDS={
 export const FINAL_FIELDS={registration:'Registration number',otr:'OTR number',applicationType:'Application type',status:'Stage'};
 export const SAVE_STATUS={draft:'Draft',ready:'Ready',attempted:'Submission attempted',confirmed:'Confirmed success',uncertain:'Outcome uncertain'};
 export function projectFields(module,fields={}) {
-  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:module==='poly'?POLY_FIELDS:module==='final'?FINAL_FIELDS:undefined;
+  const allowed=module==='password'?PASSWORD_FIELDS:module==='registration'?REGISTRATION_SAVED_FIELDS:module==='poly'?SAVED_POLY_FIELDS:module==='final'?FINAL_FIELDS:undefined;
   if(!allowed) throw new Error('Unsupported saved module.');
   const clean={};
   for(const key of Object.keys(allowed).sort()) {

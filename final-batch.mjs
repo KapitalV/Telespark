@@ -52,7 +52,7 @@ export class FinalBatch {
       const result=await Promise.race([portal[method](...args),new Promise((_,reject)=>{timer=setTimeout(()=>{void portal.close();reject(Error('Timeout'));},this.timeoutMs);})]);
       if(!this.alive(id,s))throw Error('Session closed');
       await this.activity?.record({event:'portal_result',module:'final-batch',userId:id,action:method,result:result?.kind});return result;
-    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final-batch',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation failed'),{code});}
+    } catch(error) {const code=finalErrorCode(error);await this.activity?.record({event:'portal_error',module:'final-batch',userId:id,action:method,result:'failed',code});throw Object.assign(Error('Portal operation failed'),{code,image:code==='FINAL-PAGE'&&Buffer.isBuffer(error.image)?error.image:undefined});}
     finally{clearTimeout(timer);}
   }
   async captcha(id,s,image) {
@@ -61,6 +61,7 @@ export class FinalBatch {
     s.promptId=sent?.message_id;
   }
   async openCurrent(id,s) {
+    s.passwordStep=s.phase==='password'?'password':'password-choice';
     await s.portal?.close();s.phase='loading';const row=s.rows[s.index];
     s.portal=this.portalFactory(row.applicationType);
     await this.say(id,`Candidate ${s.index+1}/${s.rows.length}: ${row.registration} (${row.applicationType}). Loading login.`);
@@ -140,6 +141,7 @@ export class FinalBatch {
     } catch(error) {
       if(this.alive(id,s)) {
         await s.portal?.close();
+        if(Buffer.isBuffer(error.image))await this.telegram.photo(id,error.image,'Final Print stopped on this portal page. Diagnostic: FINAL-PAGE. This is a diagnostic screenshot, not a completed application.').catch(()=>{});
         if(s.rows[s.index]?.status!=='pending') {s.phase='retry-next';await this.say(id,'Progress was retained. Send /retry to continue the next pending row or resend the completion report.');}
         else {s.phase=s.delivery?'delivery':'retry';if(s.delivery?.pdfId)s.rows[s.index].pdfId=s.delivery.pdfId;await this.say(id,s.delivery?'PDF retained. Use /retry to resend it without login or printing again, or /skip.':(finalErrorNotice(finalErrorCode(error))||'Portal operation stopped.')+' Use /retry for a fresh login or /skip. No application was locked.',keyboard([['/retry','/skip'],['/cancel']]));}
       }

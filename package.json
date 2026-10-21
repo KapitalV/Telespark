@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node --env-file=.env bot.mjs",
+    "start": "node --dns-result-order=ipv4first --env-file=.env bot.mjs",
     "test": "node --test",
     "test:portal": "node scripts/check-portal.mjs",
     "test:otr-portal": "node scripts/check-otr-portal.mjs",
