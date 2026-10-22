@@ -119,6 +119,12 @@ single cause or an Oracle-specific block. Do not disable TLS verification or
 change portal selectors to hide this. Live portal acceptance remains pending
 until normal HTTPS access is available.
 
+Follow-up Windows checks on the same date resolved the same IPv4 address as the
+VPS and reached TCP port 443. Windows HTTPS again returned `CRYPT_E_REVOKED`;
+Node's TLS handshake returned `ERR_SSL_UNSAFE_LEGACY_RENEGOTIATION_DISABLED`.
+These observations do not prove which network or endpoint component caused the
+failures. Certificate validation and TLS protections were left unchanged.
+
 ## Backup, restore and rollback
 
 With the bot stopped, run as root:
