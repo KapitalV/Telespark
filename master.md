@@ -12,8 +12,8 @@ There are five main menu options: password recovery, OTR, form filling, saved se
 
 | Location | Purpose |
 | --- | --- |
-| `D:\electroshorts\outputs\telespark-publish-20261009` | Development Git checkout; observed branch `feature/otnew-poly`. Contains uncommitted work that must be preserved. |
-| `D:\electroshorts\scholarship-telegram-bot` | Local running-copy directory, including private configuration and saved data. It can differ from the checkout. |
+| `D:\electroshorts\outputs\telespark-publish-20261009` | Development Git checkout; observed branch `feature/otnew-poly`. Inspect and preserve any uncommitted work before changing it. |
+| `D:\electroshorts\scholarship-telegram-bot` | Windows runtime directory, including private configuration and saved data. Disabled at Oracle cutover; it can differ from the checkout and its data becomes stale after VPS writes. |
 | `master.md` in each directory | This guide; edit the checkout copy first, then synchronize the document. |
 
 The historical repository is `KapitalV/Telespark`. Local changes do not imply that the remote repository or any deployment has those changes. This document does not assert that a bot process is currently running; inspect process and connection status when needed.
@@ -22,6 +22,7 @@ The historical repository is `KapitalV/Telespark`. Local changes do not imply th
 
 | Capability | Current evidence / limitation |
 | --- | --- |
+| Oracle migration | On 22 October 2026, 295 unit/intercepted-browser tests passed on ARM64 with no failures/skips. Telegram synthetic PDF delivery, non-root service startup, forced-crash recovery and actual reboot recovery passed. Five simultaneous mock workflows completed 150 runs without errors. Windows polling is disabled. Live portal access times out; applicant acceptance and OCI network-rule inspection remain pending. See ORACLE_OPERATIONS.md. |
 | Recovery, registration, saving, access, batch and print handling | Implemented with unit and intercepted-browser coverage. Tests use synthetic data and do not prove current portal availability. |
 | OTR recovery | The module guide records a live recovered-result screenshot verified on 10 October 2026. |
 | Fresh academic/personal/bank/fee mapping | Based on observed portal fields. Unknown controls and unsupported dependent branches stop. |
@@ -33,7 +34,7 @@ The historical repository is `KapitalV/Telespark`. Local changes do not imply th
 | School name and OBC declaration | On 20 October 2026, 66 focused tests passed with intercepted Edge fixtures enabled. School names accept spaced initials/full words and normalize pasted whitespace while retaining the portal length limit. The OBC reader can associate visible nearby declaration text with its mapped checkbox, without requiring a label element. Missing/hidden/ambiguous declarations still stop, and changed text invalidates review. Current Chrome was at login, so the reported live OBC declaration layout remains unverified. |
 | Optional OBC personal fields | Per user instruction, disability type (`ddl_Handitype`) stays unselected and family ID (`txtfamilyid`) stays blank. Only those exact optional controls on OBC personal pages bypass the unknown-field stop while unanswered; existing values, required controls and other unknown fields still stop. Omissions appear in review and remain protected by the review token. All 64 focused tests passed with intercepted Edge fixtures on 20 October 2026; live acceptance is pending. |
 | Lock and institution print | Prior live inspection established confirmation and locked/waiting states. A documented final page also returned a server error, delivered only as an INCOMPLETE diagnostic PDF. On 21 October 2026, optional browser OK declarations during verified final-print navigation gained same-tab/new-tab support; lock review remains separate and print POSTs stay blocked. All 41 focused final-print tests passed with offline Edge fixtures; the default suite passed 180 tests with 10 browser suites skipped. Live optional-dialog verification remains pending. See FINAL_PRINT.md. |
-| Latest recorded OBC verification | On 20 October 2026, after live Chrome label/ID/handler inspection, all 49 focused OBC/schema/Poly conversation tests passed with browser fixtures enabled. Exact Group 4 → Diploma in Electrical labels are covered for full/AJAX postbacks using synthetic option values. The preceding full run recorded 236 passes and 2 failures (one canceled native check-print PDF download and its parent test); OBC checks passed. That full run preceded the final label alias, so a completely clean full-suite result is still pending. Automated live section submission remains unverified. |
+| OBC verification history | On 20 October 2026, after live Chrome label/ID/handler inspection, all 49 focused OBC/schema/Poly conversation tests passed with browser fixtures enabled. Exact Group 4 → Diploma in Electrical labels are covered for full/AJAX postbacks using synthetic option values. A preceding full run recorded 236 passes and 2 failures; the later Oracle run recorded above passed all 295 tests. Automated live section submission remains unverified. |
 
 ## 2. Copy-paste prompt for another developer or agent
 

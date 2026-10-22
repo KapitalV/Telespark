@@ -125,6 +125,15 @@ Node's TLS handshake returned `ERR_SSL_UNSAFE_LEGACY_RENEGOTIATION_DISABLED`.
 These observations do not prove which network or endpoint component caused the
 failures. Certificate validation and TLS protections were left unchanged.
 
+A subsequent layer-by-layer VPS check timed out at TCP port 443 for the scholarship
+host, while Telegram TCP and HTTPS succeeded. The host OUTPUT policy accepts
+traffic and INPUT accepts established/related responses; no host firewall rule
+was found blocking the portal. Windows Playwright also timed out opening the
+public login page with normal settings. This does not establish a general outage
+or prove that OCI rules permit this destination. OCI CLI/configuration are absent;
+review the VNIC's NSGs and subnet security lists through an authorized Cloud
+Console session. No alternate endpoint, proxy or TLS downgrade was introduced.
+
 ## Backup, restore and rollback
 
 With the bot stopped, run as root:
