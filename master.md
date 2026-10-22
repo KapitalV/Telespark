@@ -22,7 +22,7 @@ The historical repository is `KapitalV/Telespark`. Local changes do not imply th
 
 | Capability | Current evidence / limitation |
 | --- | --- |
-| Oracle migration | On 22 October 2026, 295 unit/intercepted-browser tests passed on ARM64 with no failures/skips. Telegram synthetic PDF delivery, non-root service startup, forced-crash recovery and actual reboot recovery passed. Five simultaneous mock workflows completed 150 runs without errors. Windows polling is disabled. Live portal access times out; applicant acceptance and OCI network-rule inspection remain pending. See ORACLE_OPERATIONS.md. |
+| Oracle migration | On 22 October 2026, 295 unit/intercepted-browser tests passed on ARM64 with no failures/skips. Telegram synthetic PDF delivery, non-root service startup, forced-crash recovery and actual reboot recovery passed. Five simultaneous mock workflows completed 150 runs without errors. Windows polling is disabled. Authenticated OCI inspection confirmed the instance's attached security list/NSG allow stateful egress and its assigned default route points to an Internet Gateway; no corrective network setting was identified. Live portal access times out and applicant acceptance remains pending. See ORACLE_OPERATIONS.md. |
 | Recovery, registration, saving, access, batch and print handling | Implemented with unit and intercepted-browser coverage. Tests use synthetic data and do not prove current portal availability. |
 | OTR recovery | The module guide records a live recovered-result screenshot verified on 10 October 2026. |
 | Fresh academic/personal/bank/fee mapping | Based on observed portal fields. Unknown controls and unsupported dependent branches stop. |

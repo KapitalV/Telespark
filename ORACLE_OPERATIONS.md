@@ -42,7 +42,8 @@ Use root SSH for administration, but the bot runs as `telespark`. Password/root 
 access remains unchanged at the owner's explicit request. Replace the password
 shared in chat and consider key-based non-root administration separately; do not
 claim this deployment has completed that hardening. No SSH key was authorized or
-installed by this migration. OCI NSG access has not been independently inspected.
+installed by this migration. The attached OCI security list, NSG and route table
+were inspected in the authenticated console on 22 October 2026; see findings below.
 The existing IPv4 host firewall accepts SSH and rejects other unsolicited ingress;
 no global IPv6 address was present at inspection. Polling needs no public web port.
 
@@ -130,9 +131,24 @@ host, while Telegram TCP and HTTPS succeeded. The host OUTPUT policy accepts
 traffic and INPUT accepts established/related responses; no host firewall rule
 was found blocking the portal. Windows Playwright also timed out opening the
 public login page with normal settings. This does not establish a general outage
-or prove that OCI rules permit this destination. OCI CLI/configuration are absent;
-review the VNIC's NSGs and subnet security lists through an authorized Cloud
-Console session. No alternate endpoint, proxy or TLS downgrade was introduced.
+or establish the exact drop location. OCI CLI/configuration are absent. No
+alternate endpoint, proxy or TLS downgrade was introduced.
+
+Authenticated console inspection subsequently confirmed the exact instance and
+attachments against read-only instance metadata: OCI display name `kapitalv-auto`,
+hostname/primary VNIC `telespark`, the expected public IP and private address.
+Its `subnet-20261022-0152` (`10.0.0.0/24`) is attached to the inspected default
+security list. That list and the attached `ig-quick-action-NSG` each have one
+stateful all-protocol/all-port egress rule to `0.0.0.0/0`. The assigned default
+route table has one route, `0.0.0.0/0` to an Internet Gateway. No route or rule
+misconfiguration explaining the timeout was identified; no settings were changed.
+Existing `tracepath` received replies at early hops and at hop 5, then no further
+replies within a bounded 25-second run. This UDP/ICMP observation does not localize
+a TCP drop or prove deliberate IP filtering. A subsequent Windows curl reached
+TLS and reported `SEC_E_UNTRUSTED_ROOT`; this differs from the VPS TCP timeout.
+The next investigation belongs with the network/portal operators using the
+source/destination addresses and timestamps. A support report is prepared locally,
+but has not been sent. Live portal access remains unresolved.
 
 ## Backup, restore and rollback
 
