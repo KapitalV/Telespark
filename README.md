@@ -2,6 +2,8 @@
 
 **Start here: [Master project guide and developer handoff](master.md).** Covers all five menu options, Fresh/Renewal and OBC form filling, saved-user profiles, architecture, operations, tests and the current unresolved work.
 
+**Oracle ARM64 deployment:** See [Oracle operations and validation](ORACLE_OPERATIONS.md) for the systemd service, browser capacity limits, encrypted backups and migration evidence. The Windows copy is disabled after cutover to prevent competing polling.
+
 **Quick saved-user login:** Send `/saveuserNN`, then choose a service. Form filling and individual Final Print fill saved credentials automatically and show the login CAPTCHA after the required route choices. The shortcut also works inside a selected module. Section submission and locking still require review. See [saved-user shortcuts](SAVED_SESSIONS.md#saved-user-shortcuts-across-menus).
 
 **Final Print Excel batches:** The admin can upload up to 100 candidates through `/finalbatch` or **5 → Excel batch**, answer each login CAPTCHA, and receive saved PDFs sequentially. `/finaltemplate` supplies the blank workbook. Batches never lock applications. See [Excel batch instructions](FINAL_BATCH.md) for password presets, retry behavior, reports and local configuration.

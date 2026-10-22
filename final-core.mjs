@@ -48,7 +48,7 @@ export class FinalBot {
   }
   async open(id,s) {
     s.passwordStep=s.phase==='password'?'password':'password-choice';
-    s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType);
+    s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType,id);
     const image=await this.call(id,s,'open');s.phase='captcha';return this.photo(id,s,image);
   }
   async photo(id,s,image) {

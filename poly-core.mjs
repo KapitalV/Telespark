@@ -65,7 +65,7 @@ export class PolyBot {
   }
   async openLogin(id,s) {
     try {
-      s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType,s.categoryRoute);
+      s.phase='loading';await s.portal?.close();s.portal=this.portalFactory(s.applicationType,s.categoryRoute,id);
       const image=await this.call(s,'open');
       if(this.sessions.get(id)!==s||!this.canUse(id)) {await s.portal.close();return;}
       s.phase='login-captcha';

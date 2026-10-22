@@ -63,7 +63,7 @@ export class FinalBatch {
   async openCurrent(id,s) {
     s.passwordStep=s.phase==='password'?'password':'password-choice';
     await s.portal?.close();s.phase='loading';const row=s.rows[s.index];
-    s.portal=this.portalFactory(row.applicationType);
+    s.portal=this.portalFactory(row.applicationType,id);
     await this.say(id,`Candidate ${s.index+1}/${s.rows.length}: ${row.registration} (${row.applicationType}). Loading login.`);
     return this.captcha(id,s,await this.call(id,s,'open'));
   }

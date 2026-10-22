@@ -24,9 +24,15 @@ import {acquireInstanceLock} from './instance-lock.mjs';
 import {FinalBatch} from './final-batch.mjs';
 import {documentMime,downloadTelegramFile} from './telegram-files.mjs';
 import {telegramRequest,startupTelegramRequest} from './telegram-api.mjs';
+import {BrowserCapacity,limitPortal} from './browser-capacity.mjs';
+import {PollingDispatch} from './polling-dispatch.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
+if(process.env.BOT_DISABLED==='true') {
+  console.error('This bot copy is disabled. Stop the active deployment and reconcile its latest saved data before re-enabling this copy.');
+  process.exit(1);
+}
 if (!token || !/^\d+:[\w-]+$/.test(token)) {
   console.error('Set TELEGRAM_BOT_TOKEN in .env using the token from @BotFather.');
   process.exit(1);
@@ -75,28 +81,31 @@ const savedStore=new SavedStore({directory:process.env.SAVED_SESSIONS_DIR || und
 try {await savedStore.init();}
 catch {console.error('Cannot initialize encrypted saved sessions. Check storage permissions and restore the original key if records already exist.');process.exit(1);}
 const saves=new SavedSessions({store:savedStore,telegram,access,activity,defaultProfilePassword:process.env.POLY_DEFAULT_PASSWORD||''});
+const capacity=new BrowserCapacity({limit:Number(process.env.MAX_ACTIVE_BROWSERS||2)});
+const limited=(portal,id)=>limitPortal(portal,capacity,{owner:id,onQueue:()=>canUse(id)?telegram.send(id,'All browser slots are busy. Waiting up to 20 seconds for a free slot. /cancel stops this request.'):undefined});
 const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,saves,
   onDiagnostic:event => console.log(JSON.stringify(event)),
-  portalFactory:userId => loggedPortal(new ScholarshipPortal({
+  portalFactory:userId => loggedPortal(limited(new ScholarshipPortal({
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
-}),activity,{userId,module:'password'})});
-const otr = new OtrBot({telegram, allowedUserId:owner,canUse, portalFactory:(mode,userId) => loggedPortal(new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
+}),userId),activity,{userId,module:'password'})});
+const otr = new OtrBot({telegram, allowedUserId:owner,canUse, portalFactory:(mode,userId) => loggedPortal(limited(new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
   mode,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
-}),activity,{userId,module:'otr'})});
-const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,saves,portalFactory:userId=>loggedPortal(new RegistrationPortal({
+}),userId),activity,{userId,module:'otr'})});
+const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,saves,portalFactory:userId=>loggedPortal(limited(new RegistrationPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
-}),activity,{userId,module:'registration'})});
+}),userId),activity,{userId,module:'registration'})});
 const polyHeadless=createPolyHeadlessResolver();
-const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:(applicationType,categoryRoute)=>createPolyPortal({applicationType,categoryRoute,headless:polyHeadless(),channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')})});
-const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:applicationType=>new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
-const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:type=>new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')})});
+const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:(applicationType,categoryRoute,id)=>limited(createPolyPortal({applicationType,categoryRoute,headless:polyHeadless(),channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')}),id)});
+const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:(applicationType,id)=>limited(new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')}),id)});
+const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:(type,id)=>limited(new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')}),id)});
 const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
+const dispatch=new PollingDispatch({handle:message=>bot.handle(message),onError:()=>console.error('Message processing failed. No portal submission was automatically repeated.')});
 let lastMalformedAlert = -Infinity;
 async function reportMalformed({httpStatus=400}={}) {
   await activity.record({event:'system_error',module:'system',action:'webhook',reason:'invalid-arguments',httpStatus});
@@ -112,9 +121,13 @@ cleanupTimer.unref();
 let stopping = false;
 let webhookServer;
 async function shutdown() {
+  if(stopping)return;
   stopping = true;
+  dispatch.stop();capacity.stop();
   clearInterval(cleanupTimer);
   webhookServer?.close();
+  for (const chatId of bot.sessions.keys()) await bot.clear(chatId);
+  await dispatch.drain();
   for (const chatId of bot.sessions.keys()) await bot.clear(chatId);
   await activity.record({event:'bot_stopped',module:'system'});
   await releaseInstance();
@@ -183,11 +196,9 @@ try {
       const updates = await telegram.api('getUpdates',{offset,timeout:30,allowed_updates:['message']});
       for (const update of updates) {
         offset = update.update_id + 1;
-        try { await bot.handle(update.message); }
-        catch {
-          // Keep result in memory for /result if Telegram delivery failed; never resubmit.
-          console.error('An operation or message delivery failed. No automatic recovery resubmission was made.');
-        }
+        const message=update.message;
+        if(message?.chat?.type==='private'&&message.from?.id===message.chat.id&&canUse(message.from.id)&&/^\/(?:cancel|menu)(?:\s|$)/i.test(message.text||''))capacity.cancelQueued(message.chat.id);
+        if(!dispatch.submit(message))console.error('Incoming message queue is full or stopping; no portal action was started for that message.');
       }
       await bot.expire();
     } catch (error) {

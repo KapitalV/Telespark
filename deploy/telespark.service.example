@@ -1,0 +1,49 @@
+# Reference for the verified Oracle host. Validate paths before another install.
+# /etc/telespark/bot.env: root:telespark, mode 0640, Node dotenv format.
+[Unit]
+Description=Telespark Telegram bot
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=telespark
+Group=telespark
+WorkingDirectory=/opt/telespark/releases/fd7fd04-vps1
+Environment=NODE_ENV=production
+Environment=BOT_MODE=polling
+Environment=HEADLESS=true
+Environment=OTNEW_POLY_VISIBLE_ONCE=false
+Environment=BROWSER_CHANNEL=chromium
+Environment=BOT_DISABLED=false
+Environment=MAX_ACTIVE_BROWSERS=5
+Environment=HOME=/var/lib/telespark
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/cache/telespark/browsers
+Environment=ACCESS_STORE_PATH=/var/lib/telespark/data/authorized-users.json
+Environment=ACTIVITY_LOG_DIR=/var/lib/telespark/data/activity
+Environment=SAVED_SESSIONS_DIR=/var/lib/telespark/data/saved-sessions
+Environment=SAVED_SESSION_KEY_FILE=/var/lib/telespark/data/private/saved-session.key
+ExecStartPre=/usr/bin/test -s /var/lib/telespark/data/private/saved-session.key
+ExecStart=/usr/local/bin/node --dns-result-order=ipv4first --env-file=/etc/telespark/bot.env bot.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=90
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/telespark /var/cache/telespark
+MemoryHigh=6G
+MemoryMax=8G
+TasksMax=1024
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=telespark
+
+[Install]
+WantedBy=multi-user.target

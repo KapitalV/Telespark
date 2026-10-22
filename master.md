@@ -1,6 +1,6 @@
 # Telespark — master project guide and developer handoff
 
-Last reviewed: **20 October 2026 (IST)**. This guide describes the inspected local code, not a guarantee that every government-portal branch works live. Read it first, then the linked module guides and current source. Where older documents disagree, verify the implementation and update the documentation.
+Last reviewed: **22 October 2026 (IST)**. This guide describes the inspected code, not a guarantee that every government-portal branch works live. Read it first, then the linked module guides and current source. See [Oracle operations](ORACLE_OPERATIONS.md) for the VPS migration, capacity controls and validation limits. Where older documents disagree, verify the implementation and update the documentation.
 
 ## 1. Purpose and current status
 
@@ -255,6 +255,8 @@ Use [.env.example](.env.example) as the starting template. Put actual secrets on
 | `BROWSER_CHANNEL` | Installed `msedge` on Windows by default; `chrome` or bundled `chromium` as configured. |
 | `OTNEW_POLY_VISIBLE_ONCE` | `true` makes the next Poly browser visible for this process, then returns to HEADLESS behavior. It does not automatically reset across process restarts if left in configuration. |
 | `BOT_MODE` | `polling` for local use; `webhook` for a configured HTTPS service. Code infers webhook when Render URL exists and mode is unset. |
+| `BOT_DISABLED` | `true` exits before Telegram access. Set on the retired Windows copy after Oracle cutover. |
+| `MAX_ACTIVE_BROWSERS` | Shared limit across modules, integer 1–10; default 2, Oracle initially 5. Excess launches wait up to 20 seconds in a bounded queue. |
 | `ENABLE_OTR`, `ENABLE_OTNEW_POLY`, `ENABLE_FINAL_PRINT` | Feature flags; `.env.example` defaults false. Final flag also gates batches. |
 | `POLY_DEFAULT_PASSWORD` | Optional saved-user profile preset. |
 | `FINAL_DEFAULT_PASSWORD`, `FINAL_BATCH_DEEPAK_PASSWORD` | Optional individual/batch password presets; never hardcode actual values. |
