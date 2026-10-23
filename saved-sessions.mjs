@@ -264,7 +264,7 @@ export class SavedSessions {
     await this.telegram.send(id,`Reusing fields from ${record.id} (${SAVE_STATUS[record.status]}). This creates a new session. Previously submitted or uncertain records are never replayed automatically. Review the live details and complete fresh verification before submission. Saving is automatic.`);
     await this.log(id,'session_reused',record.module);
     if(record.module==='password') return this.router.recovery.reuse(id,record.fields);
-    if(record.module==='poly') return this.router.poly.start(id,record.fields);
+    if(record.module==='poly') return this.router.poly.start(id,record.fields,record.fields.operation&&record.result?.kind!=='pdf'?{resume:true,savedId:['draft','ready'].includes(record.status)?record.id:undefined}:{});
     return this.router.registration.start(id,record.fields);
   }
 }

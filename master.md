@@ -1,6 +1,6 @@
 # Telespark — master project guide and developer handoff
 
-Last reviewed: **22 October 2026 (IST)**. This guide describes the inspected code, not a guarantee that every government-portal branch works live. Read it first, then the linked module guides and current source. See [Oracle operations](ORACLE_OPERATIONS.md) for the VPS migration, capacity controls and validation limits. Where older documents disagree, verify the implementation and update the documentation.
+Last reviewed: **24 October 2026 (IST)**. This guide describes the inspected code, not a guarantee that every government-portal branch works live. Read it first, then the linked module guides and current source. See [Oracle operations](ORACLE_OPERATIONS.md) for the VPS migration, capacity controls and validation limits. Where older documents disagree, verify the implementation and update the documentation.
 
 ## 1. Purpose and current status
 
@@ -362,3 +362,17 @@ Next development steps, when that work is authorized:
 5. Add synthetic regression fixtures for the actual field difference, test both routes, then conduct the authorized live review. Report what is verified and what still stops.
 
 For any future change: inspect → implement narrowly → test → synchronize selected files → restart only if authorized → verify the consumer/connection → report limitations. Keep this guide's status section current as evidence changes.
+
+## Module 3 progress update — 24 October 2026
+
+SC/ST/General and OBC now share the bounded declaration reader in
+`poly-declaration.mjs`. Validated field answers automatically save encrypted D drafts
+before filling; errors report a `/reuse Dxxxx` command. Resume requires a fresh
+login, checks live portal status/options, restores valid answers and asks the next
+missing field. Protected attempt records are not overwritten or automatically
+resubmitted. Supported defaults apply across category routes and remain editable
+at review. See [OTNEW-POLY.md](OTNEW-POLY.md) for the current rules.
+These code changes require deployment to the Oracle release before affecting its
+running bot; pushing Git does not update that service. Live verification is pending.
+
+Validation on 24 October 2026: `OTR_BROWSER_TESTS=true node --test --test-concurrency=1` passed all 321 tests with no skips. A subsequent 57-test navigation/profile/resume run and final 36-test Poly run also passed. Browser fixtures intercepted requests; no real applicant was submitted. Live SC/ST declaration verification and Oracle deployment are pending.

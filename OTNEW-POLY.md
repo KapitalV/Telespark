@@ -28,11 +28,11 @@ Renewal opens `LoginStudentPostRenew.aspx`. The selected type is saved with the
 session and is offered for reference. A `/saveuserNN` shortcut inside an active
 login retains the type and action already chosen for that flow. From the main
 menu it asks the missing choices, then fills registration, OTR and password
-automatically and sends the login CAPTCHA. Ordinary `/reuse` retains its manual
-saved-field choices.
+automatically and sends the login CAPTCHA. `/reuse Dxxxx` resumes form drafts
+using their saved action, type and category, and asks for a fresh password/CAPTCHA.
 Next, choose **1. SC / ST / General** (the existing workflow) or **2. OBC**.
 This selects a bot mapping, not a change to the registered category. The choice
-is encrypted with the saved session and is asked again during reuse. Switching
+is encrypted with the saved session and retained during resume. Switching
 routes clears reusable form answers while keeping the saved login identity.
 OBC uses `poly-obc-schema.mjs`, an independent starting copy of the existing
 sections, and `poly-obc-portal.mjs`, which reuses the checked portal engine.
@@ -41,7 +41,7 @@ admission dates in DD/MM/YYYY format, validates real calendar dates, asks the
 15-character student enrolment number (E plus 14 digits), and offers the live
 day-scholar/residential radio choices. Course year 1/3 is the first-year default
 when available; only that year/duration requires dates 15 and 16 to match.
-Question 16 still appears and offers date 15 through USE DEFAULT. Other years
+For 1/3, question 16 automatically uses date 15 and appears in review. Other years
 can have different dates. These answers are included in encrypted saving/reuse.
 The OBC portal's untouched Intermediate fee default of zero and selected year
 placeholder do not count as entered qualification data; other populated unused
@@ -58,13 +58,14 @@ The bot then asks for the existing registration number, OTR, password and curren
 CAPTCHA, and creates a separate authenticated browser session. Credentials from
 the development conversation are never embedded in source or fixtures.
 
-In the OBC route, configured fixed defaults fill automatically when their actual
+In every module-3 category route, supported defaults fill automatically when their actual
 portal option is available, including field 10, JEECUP. Defaults are still shown
 in review, and `/edit` asks the selected field explicitly so it can be changed.
-Course, branch, applicant details and admission dates remain questions. Question
-16's date suggestion still requires USE DEFAULT or a typed answer. If a fixed
-default is unavailable or the portal discards it, the bot asks the field instead
-of repeatedly applying it. SC/ST/General keeps its existing manual default choices.
+Applicant details without a supported default remain questions. Unambiguous OBC
+course/branch preferences and the 1/3 equal-date suggestion also apply automatically.
+Saved draft answers take precedence over defaults after validation against the live
+field. If a default is unavailable or discarded, the bot asks instead of looping.
+`/edit` and `/back` preserve manual overrides.
 When the official page already selects an approved dropdown/radio answer, the
 adapter records that existing choice without dispatching another change event.
 Reselecting the same dropdown option can trigger an ASP.NET postback; avoiding
@@ -114,8 +115,8 @@ non-placeholder branch returned by that course's authenticated portal dropdown,
 using its original label and value. Coded or differently formatted branch labels
 therefore remain selectable. The observed **Diploma in Electrical** label and
 canonical **Electrical Engineering/Engg** labels are recognized for a suggestion
-only when there is one unambiguous match. Course and branch remain explicit
-user choices, shown in review; option values are read from the page, never
+only when there is one unambiguous match. These defaults apply automatically
+and remain editable in review; option values are read from the page, never
 hardcoded. Missing or ambiguous preferred options are not guessed. An empty
 dropdown or an unknown editable control still stops the flow.
 
@@ -167,7 +168,8 @@ and financial details have no applicant-specific defaults.
 Details are stored using the existing AES-256-GCM store and key. OTNew-Poly IDs
 use `D0001`, `D0002`, and so on. Existing `F-...` IDs still work. `/save` checkpoints current answers and lists section/status
 records; `/save D0001` retrieves the user's record. `/reuse D0001` opens a fresh
-session with selectable saved answers. `/result D0001` sends a saved PDF without
+session that restores valid answers against current portal fields, stopping at
+the first unanswered or changed field. `/result D0001` sends a saved PDF without
 logging in or posting a form. Administrators can list status metadata but cannot
 retrieve another user's private details or PDF.
 
@@ -209,19 +211,21 @@ intercepted Edge fixtures, including a synthetic submission retaining the
 unselected dropdown and blank family ID. Live portal acceptance remains to be
 verified in the user's next session.
 
-### School names and OBC declaration text
+### School names and shared declaration text
 
 High-school name is a text name, not a numeric school code. It accepts spaced
 initials and words such as `Y Y B INTER COLLEGE USRA BAZAR DEORIA`; pasted line
 breaks/repeated spaces become single spaces. The live input's maximum length
 still applies, and names are not silently truncated.
 
-The OBC snapshot reads declaration text from the mapped visible enabled checkbox's
+The shared snapshot reads declaration text from the mapped visible enabled checkbox's
 label, explicit ARIA reference, or a small adjacent text/container relationship.
 It does not use a whole-page search or substitute a hardcoded declaration.
 Missing, hidden or ambiguous text stops the review. The extracted wording remains
 in the review token, so changed wording prevents submission under an older review.
-The SC/ST/General declaration reader is unchanged.
+As of 24 October 2026, this also covers SC/ST/General and the review after academic
+fee 634. It fixes the category mismatch without bypassing consent. The current
+CAPTCHA is requested only after YES approves the reviewed declaration.
 
 On 20 October 2026, 66 focused tests passed with intercepted Edge fixtures enabled,
 including full-name retention, adjacent declaration markup, changed declarations
@@ -299,3 +303,21 @@ review, course reset/edit invalidation, stale token/value rejection, timeout and
 HTTP failure stops without final section submission. The shared general schema
 and adapter were unchanged. No current authenticated live course/branch option
 values were observed in this run; an authorized applicant test remains pending.
+
+## Automatic draft resume (24 October 2026)
+
+Drafts save before validated answers are filled and when the next field is prepared.
+Failures, unsupported declarations and timeouts report the D ID before browser cleanup.
+Cancellation and restart retain the encrypted draft; login passwords, CAPTCHA/OTP
+answers and cookies are excluded. `/reuse Dxxxx` starts a fresh login and restores
+answers against live options. The portal decides the current incomplete section;
+completed sections are not submitted again. Reviews, YES and fresh CAPTCHA remain.
+
+Writable draft/ready records keep their ID. Attempted, confirmed and uncertain
+records are preserved; their continuation gets a new record. Changing applicant
+identity, application type or category detaches the old draft. Saved dropdown
+labels are revalidated; account confirmation must be entered again. `/edit` and
+`/back` invalidate later dependent answers. Storage failure stops further filling;
+the last successful checkpoint may precede the current answer.
+
+Validation on 24 October 2026: `OTR_BROWSER_TESTS=true node --test --test-concurrency=1` passed all 321 tests with no skips. A subsequent 57-test navigation/profile/resume run and final 36-test Poly run also passed. Browser fixtures intercepted requests; no real applicant was submitted. Live SC/ST declaration verification and Oracle deployment are pending.

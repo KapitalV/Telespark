@@ -10,10 +10,10 @@ const schoolName='Y Y B INTER COLLEGE USRA BAZAR DEORIA';
 const declaration='मैं घोषणा करता हूँ कि परीक्षण आवेदन के विवरण सही हैं। यह केवल परीक्षण घोषणा है।';
 const checkbox=`<input type="checkbox" id="${PREFIX}chkbx1">`;
 
-test('OBC school-name and declaration DOM handling (all requests intercepted)',{skip:!enabled},async t=>{
+for(const generalRoute of [false,true]) test((generalRoute?'SC/ST/General':'OBC')+' school-name and declaration DOM handling (all requests intercepted)',{skip:!enabled},async t=>{
   const browser=await chromium.launch({headless:true,channel:process.platform==='win32'?'msedge':undefined});
   t.after(()=>browser.close());
-  async function fixture(st,markup,{general=false,maxLength=100}={}) {
+  async function fixture(st,markup,{general=generalRoute,maxLength=100,withFee=false}={}) {
     const context=await browser.newContext();await context.setOffline(true);st.after(()=>context.close());
     let posts=0;
     await context.route('**/*',async route=>{
@@ -21,6 +21,7 @@ test('OBC school-name and declaration DOM handling (all requests intercepted)',{
       if(route.request().method()==='POST')posts++;
       return route.fulfill({contentType:'text/html',body:`<!doctype html><meta charset="utf-8"><form method="post">
         <input id="${PREFIX}Gridview1_txt_schoolname_0" maxlength="${maxLength}">
+        ${withFee?`<input id="${PREFIX}Gridview1_txt_fee_0"><img id="Captcha" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40'%3E%3Ctext y='25'%3EAbC12%3C/text%3E%3C/svg%3E">`:''}
         <input id="${PREFIX}txtcptcha1">
         ${markup}
         <input type="submit" id="${PREFIX}btn_Tab1" value="Update">
@@ -28,7 +29,7 @@ test('OBC school-name and declaration DOM handling (all requests intercepted)',{
     });
     const portal=general?new PolyPortal():new ObcPolyPortal();
     portal.sections=structuredClone(portal.sections);
-    portal.sections.academic.fields=portal.sections.academic.fields.filter(f=>f.key==='Gridview1_txt_schoolname_0');
+    portal.sections.academic.fields=portal.sections.academic.fields.filter(f=>f.key==='Gridview1_txt_schoolname_0'||withFee&&f.key==='Gridview1_txt_fee_0');
     portal.context=context;portal.page=await context.newPage();portal.page.setDefaultTimeout(2000);
     await portal.page.goto(POLY_ORIGIN+'/PostMatric/ApplicationFormInstitute.aspx');
     return {portal,posts:()=>posts};
@@ -74,9 +75,19 @@ test('OBC school-name and declaration DOM handling (all requests intercepted)',{
     assert.equal((await f.portal.submit('AbC12',review.token)).kind,'unsupported');
     assert.equal(f.posts(),0);
   });
-  await t.test('General declaration rules remain unchanged',async st=>{
+  await t.test('General adjacent declaration now reaches review',async st=>{
     const f=await fixture(st,`<div>${checkbox}<span>${declaration}</span></div>`,{general:true});
     const step=await f.portal.read();const next=await f.portal.fill(step.field,schoolName,step.token);
-    assert.equal(next.kind,'unsupported');assert.equal(f.posts(),0);
+    assert.equal(next.kind,'review');assert.equal(next.declaration,declaration);assert.equal(f.posts(),0);
+  });
+  await t.test('Last academic fee 634 reaches declaration review and supplies current CAPTCHA without a POST',async st=>{
+    const f=await fixture(st,`<div><span>${checkbox}</span><span>${declaration}</span></div>`,{withFee:true});
+    const school=await f.portal.read(),fee=await f.portal.fill(school.field,schoolName,school.token);
+    assert.equal(fee.field.key,'Gridview1_txt_fee_0');assert.equal(fee.field.suggestion,'634');
+    const review=await f.portal.fill(fee.field,fee.field.suggestion,fee.token);
+    assert.equal(review.kind,'review');assert.equal(review.declaration,declaration);
+    assert.ok(review.review.includes('High-school fee field: 634'));
+    assert.ok((await f.portal.captcha()).length>100);assert.equal(f.posts(),0);
+    assert.equal(await f.portal.page.locator('#'+PREFIX+'chkbx1').isChecked(),false);
   });
 });

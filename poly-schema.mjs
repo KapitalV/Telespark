@@ -50,7 +50,7 @@ export const POLY_SECTIONS={
 export const POLY_IGNORED_EMPTY_FIELDS=['Gridview1_grid_ddl_passyr_1','Gridview1_grid_txt_TotalMarks_1','Gridview1_grid_txt_Obtain_1','Gridview1_grid_txt_Percentage_1','Gridview1_grid_txt_affiliating_1','Gridview1_txt_schoolname_1','Gridview1_txt_fee_1'];
 export const POLY_FIELDS={applicationType:'Application type',categoryRoute:'Form category route',registration:'Registration number',otr:'OTR number',password:'Portal password (encrypted saved profile)',profileSuffix:'Saved-user suffix',operation:'Requested operation',
   ...Object.fromEntries(Object.values(POLY_SECTIONS).flatMap(s=>s.fields.filter(f=>f.type!=='account-confirm').map(f=>[f.key,f.label]))),
-  status:'Last verified stage',ifsc:'Portal IFSC',studentName:'Student name',fatherName:'Father name'};
+  status:'Last verified stage',resumeField:'Resume field (rechecked on login)',resumePhase:'Last conversation step',ifsc:'Portal IFSC',studentName:'Student name',fatherName:'Father name'};
 export function percentage(obtained,total) {
   if(!/^\d+(?:\.\d{1,2})?$/.test(obtained)||!/^\d+(?:\.\d{1,2})?$/.test(total)||Number(total)<=0||Number(obtained)>Number(total)) throw Error('Obtained marks must be between zero and total marks; total marks must be greater than zero.');
   return (Number(obtained)/Number(total)*100).toFixed(2);

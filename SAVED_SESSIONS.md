@@ -11,7 +11,7 @@ Registration and password recovery save automatically before final submission. T
 | `/psave` | Save recovery details; without an active form, show its saved record or your recovery list. |
 | `/dsave SESSION_ID`, `/psave SESSION_ID` | Retrieve your saved details, password and available response image without contacting the portal. |
 | `/dsave list [page]`, `/psave list [page]` | Browse your own records while another form is active. |
-| `/reuse SESSION_ID` | Load saved fields into a fresh session; creates a new record when saved. |
+| `/reuse SESSION_ID` | Fresh login using saved fields. D form drafts resume their saved route and valid answers; editable drafts keep their ID, protected attempts are never overwritten. |
 
 Registration: complete fields and CAPTCHA → review → `YES` → automatic save → submit once.
 

@@ -129,9 +129,10 @@ test('Starting saved-user entry clears an unfinished portal session before accep
 test('Saved OBC route is displayed; switching route clears form answers but keeps login identity',async t=>{
   const f=await fixture(t);await f.login('1','Fresh','OBC');
   const id=f.poly.sessions.get(99).savedId;
-  await f.say(`/reuse ${id}`);await f.say('1');await f.say('Fresh');assert.match(f.sent.at(-1).text,/Saved route: OBC/);
+  const record=await f.store.get(id,99);
+  await f.poly.start(99,record.fields);await f.say('1');await f.say('Fresh');assert.match(f.sent.at(-1).text,/Saved route: OBC/);
   await f.say('2');assert.equal(f.poly.sessions.get(99).reuse.txt_refundAmt.value,'11010');
-  await f.say(`/reuse ${id}`);await f.say('1');await f.say('Renewal');await f.say('1');
+  await f.poly.start(99,record.fields);await f.say('1');await f.say('Renewal');await f.say('1');
   const s=f.poly.sessions.get(99);assert.equal(s.reuse.txt_refundAmt,undefined);assert.equal(s.reuse.registration.value,'000012345678');
   await f.say('/cancel');assert.equal(f.poly.sessions.size,0);
 });
@@ -147,7 +148,7 @@ test('OBC extra answers save encrypted and appear with labels in the owner saved
   assert.match(view,/Student enrolment number/);assert.match(view,/Day scholar \/ Residential student/);assert.doesNotMatch(view,/undefined:/);
 });
 
-test('Telegram asks both dates, offers the first date explicitly, and accepts residence selection before review',async t=>{
+test('Telegram applies the equal-date default automatically and asks enrolment and residence before review',async t=>{
   const f=await fixture(t),fields=structuredClone(OBC_EXTRA_FIELDS);let index=0,fills=0;
   fields[1]={...fields[1],sameAs:'txt_fstyr_addmissiondt',suggestion:'01/08/2026',note:'Course year is 1/3: this must match question 15.'};
   fields[3].options=[{value:'day',label:'दिवा छात्र'},{value:'resident',label:'आवासीय छात्र'}];
@@ -156,10 +157,7 @@ test('Telegram asks both dates, offers the first date explicitly, and accepts re
   s.portal.values=()=>Object.fromEntries([...s.portal.answers].map(([key,answer])=>[key,answer.value]));
   s.portal.fill=async(field,value)=>{fills++;s.portal.answers.set(field.key,{value,display:field.options?.find(o=>o.value===value)?.label||value});index++;return next();};
   await f.say('31/02/2026');assert.equal(fills,0);
-  await f.say('01/08/2026');assert.equal(fills,1);assert.match(f.sent.at(-1).text,/16\. Current-session/);
-  assert.match(f.sent.at(-1).text,/must match question 15/);assert.ok(f.sent.at(-1).options.reply_markup.keyboard.some(row=>row.includes('USE DEFAULT')));
-  await f.say('02/08/2026');assert.equal(fills,1);assert.match(f.sent.at(-1).text,/same date/);
-  await f.say('USE DEFAULT');assert.equal(fills,2);assert.match(f.sent.at(-1).text,/17\. Student enrolment/);
+  await f.say('01/08/2026');assert.equal(fills,2);assert.match(f.sent.at(-1).text,/17\. Student enrolment/);
   await f.say('E123');assert.equal(fills,2);
   await f.say('e00000000000001');assert.match(f.sent.at(-1).text,/18\. Day scholar/);
   await f.say('2. आवासीय छात्र');assert.equal(s.phase,'confirm');assert.equal(fills,4);assert.equal(f.counts().submits,0);
@@ -168,7 +166,106 @@ test('Telegram asks both dates, offers the first date explicitly, and accepts re
 
 const examinationField=()=>({...OBC_SECTIONS.academic.fields.find(field=>field.key==='ddl_uptu_type'),options:[{value:'jee-live',label:'JEECUP'},{value:'neet-live',label:'NEET'}],suggestion:'jee-live'});
 
-test('OBC Telegram prompts Group 4 then Electrical Engineering explicitly and saves both in review',async t=>{
+test('Field checkpoints survive adapter failures and resume with a new login at the first missing answer',async t=>{
+  const fields=[
+    {key:'ddl_CurrentCourse_Branch',label:'Branch',type:'choice',options:[{value:'cs',label:'Computer Science'}]},
+    {key:'Gridview1_txt_schoolname_0',label:'School',type:'school-name'},
+    {key:'Gridview1_txt_fee_0',label:'Fee',type:'number',suggestion:'634'},
+    {key:'txt_aktu_councilling_rank',label:'Rank',type:'digits'},
+  ];
+  let fail=true,portalNumber=0;const fills=[];
+  const f=await fixture(t,{configurePortal:portal=>{
+    portalNumber++;portal.answers.clear();
+    const next=()=>{const field=fields.find(field=>!portal.answers.has(field.key));return field?{kind:'field',stage:'academic',field,token:field.key}:{kind:'review',stage:'academic',review:['All restored answers'],declaration:'Synthetic declaration',token:'review'};};
+    portal.choose=async()=>next();portal.values=()=>Object.fromEntries([...portal.answers].map(([key,answer])=>[key,answer.value]));
+    portal.fill=async(field,value)=>{
+      fills.push([portalNumber,field.key,value]);
+      if(fail&&field.key==='Gridview1_txt_fee_0')throw Error('Synthetic adapter failure');
+      portal.answers.set(field.key,{value,display:field.options?.find(option=>option.value===value)?.label||value});return next();
+    };
+    portal.close=async()=>{portal.closed=true;portal.answers.clear();};
+  }});
+  await f.login();await f.say('1');await f.say('SYNTHETIC INTER COLLEGE');
+  const id=f.poly.sessions.get(99).savedId;assert.match(id,/^D\d{4}$/);assert.equal(f.poly.sessions.get(99).phase,'blocked');
+  const record=await f.store.get(id,99);assert.equal(record.fields.Gridview1_txt_fee_0.value,'634');assert.equal(record.fields.Gridview1_txt_schoolname_0.value,'SYNTHETIC INTER COLLEGE');
+  assert.equal(record.fields.password,undefined);assert.equal(record.fields.captcha,undefined);assert.match(f.sent.map(m=>m.text||'').join('\n'),new RegExp('/reuse '+id));
+  await f.say('/cancel');await f.store.init();fail=false;
+  await f.say('/reuse '+id);let s=f.poly.sessions.get(99);
+  assert.equal(s.phase,'login');assert.equal(s.index,2);assert.equal(s.savedId,id);assert.equal(s.categoryRoute,'sc-st-general');
+  assert.equal(f.counts().logins,1);await f.say('FreshPassword1@');assert.equal(s.phase,'login-captcha');await f.say('New12');
+  assert.equal(s.step.field.key,'txt_aktu_councilling_rank');assert.equal(s.phase,'questions');assert.equal(f.counts().submits,0);
+  assert.deepEqual(fills.filter(([n])=>n===2).map(([,key])=>key),fields.slice(0,3).map(field=>field.key));
+  await f.say('00195');assert.equal(s.phase,'confirm');await f.say('YES');assert.equal(s.phase,'captcha');assert.equal(f.counts().submits,0);
+  await assert.rejects(f.store.get(id,42));assert.doesNotMatch(JSON.stringify(f.events),/FreshPassword|SYNTHETIC INTER COLLEGE|New12/);
+});
+
+test('Unreadable declaration preserves the 634 answer before browser cleanup',async t=>{
+  const field={...POLY_SECTIONS.academic.fields.at(-1),suggestion:'634'};
+  const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'academic',field,token:1}),configurePortal:portal=>{
+    portal.fill=async(f,value)=>{portal.answers.set(f.key,{value,display:value});return {kind:'unsupported',message:'The declaration could not be read. No form was submitted.'};};
+    portal.close=async()=>{portal.closed=true;portal.answers.clear();};
+  }});
+  await f.login();const s=f.poly.sessions.get(99);assert.equal(s.phase,'unsupported');assert.equal(s.portal.answers.size,0);
+  assert.equal((await f.store.get(s.savedId,99)).fields.Gridview1_txt_fee_0.value,'634');assert.equal(f.counts().submits,0);
+});
+
+test('Saved dropdown labels are revalidated and missing options never fall back to a default',async t=>{
+  const field={key:'ddl_CurrentCourse_Branch',label:'Branch',type:'choice',suggestion:'other',options:[{value:'old',label:'Different branch'},{value:'other',label:'Electrical'}]};let fills=0;
+  const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'academic',field,token:1}),configurePortal:portal=>{portal.fill=async()=>{fills++;throw Error('Should not auto fill');};}});
+  const record=await f.store.save({userId:99,module:'poly',fields:{registration:{value:'000012345678'},otr:{value:'UP26-0000000001'},operation:{value:'fill'},ddl_CurrentCourse_Branch:{value:'old',label:'Computer Science'}}});
+  await f.say('/reuse '+record.id);await f.say('Secret1@');await f.say('AbC12');assert.equal(f.poly.sessions.get(99).phase,'questions');assert.equal(fills,0);
+  assert.equal(f.poly.sessions.get(99).options.length,2);
+  assert.equal(f.poly.sessions.get(99).reuse.ddl_CurrentCourse_Branch,undefined);
+  assert.ok(f.sent.some(m=>m.text?.includes('saved answer needs a fresh choice')));
+});
+
+test('Uncertain D records remain immutable and resume checks the live dashboard without another submission',async t=>{
+  const f=await fixture(t,{result:{kind:'unknown'}});await f.login();const id=f.poly.sessions.get(99).savedId;
+  await f.say('YES');await f.say('AbC12');const original=await f.store.get(id,99);assert.equal(original.status,'uncertain');
+  await f.say('/reuse '+id);await f.say('Secret1@');await f.say('New12');
+  assert.equal(f.poly.sessions.get(99).phase,'confirm');assert.notEqual(f.poly.sessions.get(99).savedId,id);
+  assert.equal(f.counts().submits,1);assert.deepEqual(await f.store.get(id,99),original);
+});
+
+test('Resuming an already completed form follows live status and never refills academic answers',async t=>{
+  const f=await fixture(t,{chooseStep:operation=>operation==='fill'?{kind:'complete',stage:'form'}:{kind:'field',stage:'income',field:{key:'txt_std_ninm',label:'Income application',type:'digits'},token:2}});
+  const record=await f.store.save({userId:99,module:'poly',fields:{registration:{value:'000012345678'},otr:{value:'UP26-0000000001'},applicationType:{value:'Renewal'},categoryRoute:{value:'obc'},operation:{value:'fill'},Gridview1_txt_schoolname_0:{value:'SYNTHETIC SCHOOL'}}});
+  await f.say('/reuse '+record.id);await f.say('Secret1@');await f.say('AbC12');
+  const s=f.poly.sessions.get(99);assert.equal(s.operation,'certificates');assert.equal(s.step.stage,'income');
+  assert.equal(f.portalTypes.at(-1),'Renewal');assert.equal(f.portalRoutes.at(-1),'obc');assert.equal(f.counts().submits,0);
+});
+
+test('Resume requires re-entering bank account confirmation and retains owner-only data after expiry',async t=>{
+  const field=POLY_SECTIONS.bank.fields.find(field=>field.type==='account-confirm');
+  const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'bank',field,token:1})});
+  const record=await f.store.save({userId:99,module:'poly',fields:{registration:{value:'000012345678'},otr:{value:'UP26-0000000001'},operation:{value:'fill'},txt_std_accno:{value:'0000123456'}}});
+  await f.say('/reuse '+record.id);await f.say('Secret1@');await f.say('AbC12');
+  assert.equal(f.poly.sessions.get(99).step.field.type,'account-confirm');assert.equal(f.poly.sessions.get(99).phase,'questions');
+  f.advance(21*60_000);await f.router.expire();assert.equal(f.poly.sessions.has(99),false);
+  assert.equal((await f.store.get(record.id,99)).fields.txt_std_accno.value,'0000123456');await assert.rejects(f.store.get(record.id,42));
+});
+
+test('Changing identity through /back detaches a resumed D draft without overwriting it',async t=>{
+  const f=await fixture(t);await f.login();const id=f.poly.sessions.get(99).savedId,original=await f.store.get(id,99);
+  await f.say('/reuse '+id);await f.say('/back');await f.say('/back');
+  assert.equal(f.poly.sessions.get(99).index,0);await f.say('000099999999');
+  const s=f.poly.sessions.get(99);assert.equal(s.resume,false);assert.equal(s.savedId,undefined);assert.deepEqual(s.draftFields,{});
+  assert.deepEqual(await f.store.get(id,99),original);
+});
+
+test('Defaults apply for both routes and application types; failed saving prevents further filling',async t=>{
+  for(const route of ['1','OBC'])for(const type of ['Fresh','Renewal']) {
+    const field={...POLY_SECTIONS.fee.fields[0],suggestion:'11010'};let fills=0;
+    const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'fee',field,token:1}),configurePortal:portal=>{portal.fill=async()=>{fills++;return {kind:'review',stage:'fee',review:['Fee: 11010'],token:2};};}});
+    await f.login('1',type,route);assert.equal(fills,1);assert.equal(f.poly.sessions.get(99).phase,'confirm');
+    assert.equal(f.counts().submits,0);
+  }
+  const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'fee',field:{...POLY_SECTIONS.fee.fields[0],suggestion:'11010'},token:1})});
+  f.store.save=async()=>{throw Error('Disk full');};await f.login();assert.equal(f.poly.sessions.get(99).phase,'blocked');assert.equal(f.counts().submits,0);
+  assert.ok(f.sent.some(m=>m.text?.includes('could not be saved')));
+});
+
+test('OBC applies supported course and branch defaults and saves both for review',async t=>{
   const keys=['ddl_CourseName','ddl_CurrentCourse_Branch'];
   const live=[[{value:'course3-live',label:'Diploma Engg (Group3)'},{value:'course4-live',label:'Diploma In Engg. 3 Yrs (Group 4)'}],[{value:'cs-live',label:'Diploma in Computer Science & Engg.'},{value:'electrical-live',label:'Electrical Engineering'}]];
   const fields=keys.map((key,index)=>{const field=OBC_SECTIONS.academic.fields.find(field=>field.key===key),options=filterObcOptions(field,live[index]);return {...field,options,suggestion:preferredObcValue(field,options)};});
@@ -177,9 +274,7 @@ test('OBC Telegram prompts Group 4 then Electrical Engineering explicitly and sa
     portal.sections=OBC_SECTIONS;
     portal.fill=async(field,value)=>{fills.push(value);portal.answers.set(field.key,{value,display:field.options.find(option=>option.value===value).label});index++;return index<2?step():{kind:'review',stage:'academic',review:[...portal.answers].filter(([key])=>keys.includes(key)).map(([,answer])=>answer.display),token:3};};
   }});
-  await f.login('1','Fresh','OBC');assert.equal(f.poly.sessions.get(99).phase,'questions');assert.match(f.sent.at(-1).text,/Default: Diploma In Engg\. 3 Yrs \(Group 4\)/);assert.deepEqual(fills,[]);
-  await f.say('USE DEFAULT');assert.equal(f.poly.sessions.get(99).phase,'questions');assert.match(f.sent.at(-1).text,/Default: Electrical Engineering/);
-  await f.say('USE DEFAULT');assert.deepEqual(fills,['course4-live','electrical-live']);const s=f.poly.sessions.get(99);assert.equal(s.phase,'confirm');
+  await f.login('1','Fresh','OBC');assert.deepEqual(fills,['course4-live','electrical-live']);const s=f.poly.sessions.get(99);assert.equal(s.phase,'confirm');
   const record=await f.store.get(s.savedId,99);assert.equal(record.fields.ddl_CourseName.value,'course4-live');assert.equal(record.fields.ddl_CurrentCourse_Branch.label,'Electrical Engineering');assert.equal(f.counts().submits,0);
 });
 
@@ -239,11 +334,10 @@ test('Missing defaults and portal-discarded defaults become manual questions wit
   }
 });
 
-test('SC/ST/General default suggestions remain manual choices',async t=>{
+test('SC/ST/General applies default suggestions automatically and stops for review',async t=>{
   const field={...POLY_SECTIONS.academic.fields.find(field=>field.key==='ddl_uptu_type'),options:[{value:'jee-live',label:'JEECUP'}],suggestion:'jee-live'};let fills=0;
   const f=await fixture(t,{chooseStep:()=>({kind:'field',stage:'academic',field,token:1}),configurePortal:portal=>{portal.fill=async()=>{fills++;return {kind:'review',stage:'academic',review:['Counselling examination: JEECUP'],token:2};};}});
-  await f.login();assert.equal(f.poly.sessions.get(99).phase,'questions');assert.equal(fills,0);
-  await f.say('USE DEFAULT');assert.equal(fills,1);assert.equal(f.poly.sessions.get(99).phase,'confirm');
+  await f.login();assert.equal(fills,1);assert.equal(f.poly.sessions.get(99).phase,'confirm');assert.equal(f.counts().submits,0);
 });
 
 test('Saved-user custom passwords, suffix collisions, cancellation, expiry and ownership are safe',async t=>{

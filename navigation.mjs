@@ -77,7 +77,7 @@ export async function previousInput(router,id) {
       const index=s.phase==='confirm'?fields.length:fields.findIndex(field=>field.key===s.step.field?.key);
       const field=fields[index-1];if(!field) return send(boundary);
       s.manualEditKey=field.key;
-      for(const later of fields.slice(index-1)) s.autoDefaultAttempted?.delete(s.step.stage+':'+later.key);
+      bot.invalidateAnswers(s,fields.slice(index-1));
       return await bot.prompt(id,s,await bot.call(s,'edit',field.key));
     }
     if(module==='otr'||module==='registration') {

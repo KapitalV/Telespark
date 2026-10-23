@@ -3,7 +3,6 @@ import {OBC_SECTIONS,OBC_IGNORED_EMPTY_FIELDS,isFirstYearOfThree,filterObcOption
 import {obcFieldDiagnostic} from './poly-diagnostics.mjs';
 import {POLY_ORIGIN,PREFIX,normalizePoly} from './poly-schema.mjs';
 import {randomUUID} from 'node:crypto';
-import {readObcDeclarations} from './poly-obc-declaration.mjs';
 
 export class ObcPolyPortal extends PolyPortal {
   constructor({cascadeTimeoutMs=30_000,...options}={}) {
@@ -38,16 +37,6 @@ export class ObcPolyPortal extends PolyPortal {
     if(optional.includes(PREFIX+'txtfamilyid')) review.push('Family ID: left blank.');
     return review;
   }
-  async snapshot() {
-    const snapshot=await super.snapshot();
-    const ids=Object.values(this.sections).filter(section=>section.declaration).map(section=>'ContentPlaceHolder1_'+section.declaration);
-    const declarations=await this.page.evaluate(readObcDeclarations,ids);
-    for(const declaration of declarations) {
-      const field=snapshot.fields.find(field=>field.id===declaration.id);
-      if(field) field.label=declaration.label;
-    }
-    return snapshot;
-  }
   async read() {
     let step=await super.read();
     if(step.kind==='field'&&['obc-course','obc-branch'].includes(step.field.filter)) {
@@ -60,7 +49,7 @@ export class ObcPolyPortal extends PolyPortal {
       return first?{...step,field:{...step.field,suggestion:first.value}}:step;
     }
     if(step.kind==='field'&&step.field.key==='txt_currentsessiondate'&&isFirstYearOfThree(this.answers.get('courseYear'))) {
-      return {...step,field:{...step.field,sameAs:'txt_fstyr_addmissiondt',suggestion:this.values().txt_fstyr_addmissiondt,note:'Course year is 1/3: this must match question 15. Send USE DEFAULT to use that date.'}};
+      return {...step,field:{...step.field,sameAs:'txt_fstyr_addmissiondt',suggestion:this.values().txt_fstyr_addmissiondt,note:'Course year is 1/3: this must match question 15. The matching date is applied automatically and shown in review.'}};
     }
     if(step.kind==='review'&&step.stage==='academic'&&isFirstYearOfThree(this.answers.get('courseYear'))) {
       const values=this.values();

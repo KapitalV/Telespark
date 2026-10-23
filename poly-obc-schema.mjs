@@ -4,11 +4,11 @@ import {PREFIX,POLY_SECTIONS,POLY_IGNORED_EMPTY_FIELDS,filterOptions} from './po
 // actual portal controls; shared validators and submission checks stay common.
 export const OBC_SECTIONS=structuredClone(POLY_SECTIONS);
 // These filters belong only to OBC. Suggestions use the current option value
-// and remain explicit choices, including when a saved answer is available.
+// and are applied automatically when unambiguous, with review/edit retained.
 Object.assign(OBC_SECTIONS.academic.fields.find(field=>field.key==='ddl_CourseName'),{filter:'obc-course',preferredGroup:4});
 Object.assign(OBC_SECTIONS.academic.fields.find(field=>field.key==='ddl_CurrentCourse_Branch'),{filter:'obc-branch',preferredLabel:'Electrical Engineering'});
-// The user requested automatic fixed defaults in OBC. Live suggestions without
-// an explicit fixed default (such as admission date 16) remain questions.
+// Retained schema metadata for fixed defaults. PolyBot also applies supported
+// live suggestions across routes, including the equal-date rule.
 for(const section of Object.values(OBC_SECTIONS)) for(const field of section.fields) {
   if(field.defaultLabel!==undefined||field.defaultValue!==undefined) field.autoDefault=true;
 }

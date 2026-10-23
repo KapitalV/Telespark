@@ -2,6 +2,7 @@ import {chromium} from 'playwright';
 import {POLY_ORIGIN,PREFIX,POLY_SECTIONS,POLY_IGNORED_EMPTY_FIELDS,filterOptions,normalizePoly,percentage} from './poly-schema.mjs';
 import {validatePolyPdf} from './poly-pdf.mjs';
 import {unmappedPolyFields} from './poly-diagnostics.mjs';
+import {readPolyDeclarations} from './poly-declaration.mjs';
 
 const paths=new Set(['/loginstudentpost.aspx','/postmatric/default.aspx','/postmatric/applicationforminstitute.aspx','/postmatric/applicationformupdateinstitute.aspx','/postmatric/applicationaccept.aspx','/postmatric/getincomecasteauth.aspx','/postmatric/tempprintinstitute.aspx']);
 const selector=id=>'#'+id;
@@ -58,7 +59,15 @@ export class PolyPortal {
     await this.page.goto(POLY_ORIGIN+this.loginPath,{waitUntil:'domcontentloaded'});
     return this.loginImage();
   }
-  async snapshot() {return this.page.evaluate(readPolyDocument);}
+  async snapshot() {
+    const snapshot=await this.page.evaluate(readPolyDocument);
+    const ids=Object.values(this.sections).filter(section=>section.declaration).map(section=>PREFIX+section.declaration);
+    for(const declaration of await this.page.evaluate(readPolyDeclarations,ids)) {
+      const field=snapshot.fields.find(field=>field.id===declaration.id);
+      if(field) field.label=declaration.label;
+    }
+    return snapshot;
+  }
   safe(s) {
     try {const u=new URL(s.url),a=new URL(s.formAction||s.url);return !this.closed&&!this.externalBlocked&&!s.externalFrame&&u.origin===POLY_ORIGIN&&this.paths.has(u.pathname.toLowerCase())&&a.origin===POLY_ORIGIN&&a.pathname===u.pathname&&['','_self'].includes(s.target);} catch {return false;}
   }
