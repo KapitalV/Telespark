@@ -20,7 +20,10 @@ export function portalLauncher() {
   const portalProxy = (process.env.PORTAL_PROXY || '').trim();
   const isLinux = process.platform === 'linux';
   return options => {
-    const defaultArgs = isLinux ? ['--no-sandbox', '--disable-setuid-sandbox'] : [];
+    const defaultArgs = [
+      '--ignore-certificate-errors',
+      ...(isLinux ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
+    ];
     const args = Array.from(new Set([...(options?.args || []), ...defaultArgs]));
     const launchOptions = {...options, args};
     if (portalProxy) {

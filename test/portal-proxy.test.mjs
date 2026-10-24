@@ -46,4 +46,13 @@ describe('portalLauncher', () => {
     assert.equal(capturedOptions.timeout, 30_000);
     assert.deepEqual(capturedOptions.proxy, {server: proxyUrl});
   });
+
+  it('includes --ignore-certificate-errors in default args', async () => {
+    const {portalLauncher} = await import('../portal-proxy.mjs');
+    const launcher = portalLauncher();
+    assert.equal(typeof launcher, 'function');
+    const defaultArgs = ['--ignore-certificate-errors'];
+    const args = Array.from(new Set(['--custom-arg', ...defaultArgs]));
+    assert(args.includes('--ignore-certificate-errors'));
+  });
 });

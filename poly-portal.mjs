@@ -45,7 +45,7 @@ export class PolyPortal {
   async open() {
     const browser=await this.launch({headless:this.headless,channel:this.channel==='chromium'?undefined:this.channel,timeout:30_000});
     if(this.closed) {await browser.close();throw Error('Session closed.');}this.browser=browser;
-    this.context=await browser.newContext({viewport:{width:1280,height:960},acceptDownloads:true});
+    this.context=await browser.newContext({viewport:{width:1280,height:960},acceptDownloads:true,ignoreHTTPSErrors:true});
     await this.context.route('**/*',async route=>{
       const request=route.request(),u=new URL(request.url());
       if(u.origin!==POLY_ORIGIN || (request.isNavigationRequest()&&!this.paths.has(u.pathname.toLowerCase())&&request.url()!==this.nativePdfUrl)) {
