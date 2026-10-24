@@ -1,7 +1,7 @@
 // Shared browser leases across all modules. Queues contain no persisted data.
 export class BrowserCapacity {
   constructor({limit=2,maxQueue=50,waitMs=20000}={}) {
-    if(!Number.isInteger(limit)||limit<1||limit>10||!Number.isInteger(maxQueue)||maxQueue<0||maxQueue>100||!Number.isInteger(waitMs)||waitMs<1||waitMs>30000)throw Error('Invalid browser capacity settings');
+    if(!Number.isInteger(limit)||limit<1||limit>20||!Number.isInteger(maxQueue)||maxQueue<0||maxQueue>200||!Number.isInteger(waitMs)||waitMs<1||waitMs>120000)throw Error('Invalid browser capacity settings');
     Object.assign(this,{limit,maxQueue,waitMs});this.active=0;this.queue=[];this.stopped=false;
   }
   acquire({signal,onQueue=()=>{},owner}={}) {
