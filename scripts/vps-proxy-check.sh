@@ -40,4 +40,12 @@ fi
 
 echo ""
 echo "=== Bot service ==="
-systemctl is-active telespark 2>/dev/null || echo "telespark not running"
+if command -v pm2 >/dev/null 2>&1 && pm2 describe telespark >/dev/null 2>&1; then
+  pm2 list | grep telespark
+elif [ -x /opt/node-v24.22.1-linux-arm64/bin/pm2 ] && /opt/node-v24.22.1-linux-arm64/bin/pm2 describe telespark >/dev/null 2>&1; then
+  /opt/node-v24.22.1-linux-arm64/bin/pm2 list | grep telespark
+elif systemctl is-active telespark 2>/dev/null; then
+  echo "systemd telespark active"
+else
+  echo "telespark not running"
+fi
