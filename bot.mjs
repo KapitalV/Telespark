@@ -26,6 +26,7 @@ import {documentMime,downloadTelegramFile} from './telegram-files.mjs';
 import {telegramRequest,startupTelegramRequest} from './telegram-api.mjs';
 import {BrowserCapacity,limitPortal} from './browser-capacity.mjs';
 import {PollingDispatch} from './polling-dispatch.mjs';
+import {portalLauncher} from './portal-proxy.mjs';
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const owner = process.env.TELEGRAM_ALLOWED_USER_ID?.trim() ?? '';
@@ -81,29 +82,35 @@ const savedStore=new SavedStore({directory:process.env.SAVED_SESSIONS_DIR || und
 try {await savedStore.init();}
 catch {console.error('Cannot initialize encrypted saved sessions. Check storage permissions and restore the original key if records already exist.');process.exit(1);}
 const saves=new SavedSessions({store:savedStore,telegram,access,activity,defaultProfilePassword:process.env.POLY_DEFAULT_PASSWORD||''});
-const capacity=new BrowserCapacity({limit:Number(process.env.MAX_ACTIVE_BROWSERS||2)});
-const limited=(portal,id)=>limitPortal(portal,capacity,{owner:id,onQueue:()=>canUse(id)?telegram.send(id,'All browser slots are busy. Waiting up to 20 seconds for a free slot. /cancel stops this request.'):undefined});
+const queueWaitMs = Number(process.env.BROWSER_QUEUE_WAIT_MS || 60000);
+const capacity=new BrowserCapacity({limit:Number(process.env.MAX_ACTIVE_BROWSERS||6),maxQueue:Number(process.env.BROWSER_MAX_QUEUE||100),waitMs:queueWaitMs});
+const launch=portalLauncher();
+const waitSec = Math.round(queueWaitMs / 1000);
+const limited=(portal,id)=>limitPortal(portal,capacity,{owner:id,onQueue:()=>canUse(id)?telegram.send(id,`All browser slots are busy. Waiting up to ${waitSec} seconds for a free slot. /cancel stops this request.`):undefined});
 const recovery = new RecoveryBot({telegram, allowedUserId:owner,canUse,saves,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   portalFactory:userId => loggedPortal(limited(new ScholarshipPortal({
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
+  launch,
 }),userId),activity,{userId,module:'password'})});
 const otr = new OtrBot({telegram, allowedUserId:owner,canUse, portalFactory:(mode,userId) => loggedPortal(limited(new (mode === 'recover' ? OtrRecoveryPortal : OtrPortal)({
   mode,
   onDiagnostic:event => console.log(JSON.stringify(event)),
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
+  launch,
 }),userId),activity,{userId,module:'otr'})});
 const registration = new RegistrationBot({telegram,allowedUserId:owner,canUse,saves,portalFactory:userId=>loggedPortal(limited(new RegistrationPortal({
   headless:process.env.HEADLESS !== 'false',
   channel:process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : 'chromium'),
+  launch,
 }),userId),activity,{userId,module:'registration'})});
 const polyHeadless=createPolyHeadlessResolver();
-const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:(applicationType,categoryRoute,id)=>limited(createPolyPortal({applicationType,categoryRoute,headless:polyHeadless(),channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium')}),id)});
-const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:(applicationType,id)=>limited(new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')}),id)});
-const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:(type,id)=>limited(new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium')}),id)});
+const poly=new PolyBot({telegram,store:savedStore,canUse,activity,portalFactory:(applicationType,categoryRoute,id)=>limited(createPolyPortal({applicationType,categoryRoute,headless:polyHeadless(),channel:process.env.BROWSER_CHANNEL || (process.platform==='win32'?'msedge':'chromium'),launch}),id)});
+const final=new FinalBot({telegram,store:savedStore,canUse,activity,defaultPassword:process.env.FINAL_DEFAULT_PASSWORD||'',portalFactory:(applicationType,id)=>limited(new FinalPortal({applicationType,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium'),launch}),id)});
+const batch=new FinalBatch({telegram,isAdmin:id=>access.isAdmin(id)&&access.canUse(id),activity,deliver:(id,s)=>final.deliver(id,s),presets:{'Gpm preset':process.env.FINAL_DEFAULT_PASSWORD||'','Deepak preset':process.env.FINAL_BATCH_DEEPAK_PASSWORD||''},portalFactory:(type,id)=>limited(new FinalPortal({applicationType:type,headless:process.env.HEADLESS!=='false',channel:process.env.BROWSER_CHANNEL||(process.platform==='win32'?'msedge':'chromium'),launch}),id)});
 const bot = new BotRouter({telegram, recovery, otr, registration, poly, final, batch, access, activity, saves, allowedUserId:owner, enableOtr:process.env.ENABLE_OTR === 'true',enablePoly:process.env.ENABLE_OTNEW_POLY==='true',enableFinal:process.env.ENABLE_FINAL_PRINT==='true'});
 const dispatch=new PollingDispatch({handle:message=>bot.handle(message),onError:()=>console.error('Message processing failed. No portal submission was automatically repeated.')});
 let lastMalformedAlert = -Infinity;
@@ -179,7 +186,7 @@ try {
     if (process.env.PORTAL_STARTUP_CHECK === 'true') {
       console.log(JSON.stringify(await probeConnection()));
       for (const applicationType of ['Renewal','Fresh']) {
-        console.log(JSON.stringify({...await probePortal({headless:true,channel:process.env.BROWSER_CHANNEL || 'chromium',applicationType}),applicationType}));
+        console.log(JSON.stringify({...await probePortal({headless:true,channel:process.env.BROWSER_CHANNEL || 'chromium',applicationType,launch}),applicationType}));
       }
     }
   } else {
