@@ -1,7 +1,7 @@
 #!/bin/bash
 # Quick diagnostic: check if WARP proxy + scholarship portal are working
 echo "=== WARP Status ==="
-warp-cli status 2>/dev/null || echo "WARP not installed"
+warp-cli --accept-tos status 2>/dev/null || echo "WARP not installed"
 echo ""
 
 echo "=== Direct connection (no proxy) ==="
